@@ -43,6 +43,36 @@ https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics
 einmalige statische Kopie herunter, die sich nie aktualisiert. Stattdessen den
 Google-Kalender-Link oben verwenden.
 
+## Feed prüfen
+
+Der Feed ist UTF-8 (ohne BOM, CRLF-Zeilenenden). GitHub Pages liefert ihn als
+`Content-Type: text/calendar` **ohne** `charset`-Parameter aus — Header lassen
+sich dort nicht konfigurieren. Manche Clients raten dann falsch und stellen
+Umlaute als Mojibake dar (`ZÃ¼rich` statt `Zürich`). Das betrifft nur die
+Anzeige beim Abrufen, nicht die Datei.
+
+Bekannter Fall: **Windows PowerShell 5.1** dekodiert eine Antwort ohne
+`charset` als ISO-8859-1. Zum Prüfen deshalb die Kodierung explizit setzen:
+
+```powershell
+# Windows PowerShell 5.1 — erzwingt UTF-8
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$r = [Net.WebClient]::new()
+$r.Encoding = [Text.Encoding]::UTF8
+$r.DownloadString("https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics") -split "`r`n" | Select-Object -First 20
+```
+
+PowerShell 7+ (`pwsh`) verwendet standardmässig UTF-8, dort genügt
+`Invoke-WebRequest`. Ebenso `curl`:
+
+```bash
+curl -s https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics | head -20
+```
+
+Kalender-Clients (Apple Kalender, Google Kalender, Thunderbird, Nextcloud)
+behandeln iCalendar gemäss RFC 5545 grundsätzlich als UTF-8 und sind von
+diesem Verhalten nicht betroffen.
+
 ## Funktionen
 
 - Nächtliche automatische Aktualisierung aus der Single Source of Truth (CKAN-Datastore)
