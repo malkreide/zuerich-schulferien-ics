@@ -8,8 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Cutoff: only events reaching into the current or previous calendar year are
-  published. The source starts in 2018, which buried subscribers under years of
+- Cutoff: only events reaching into the current or the two preceding calendar
+  years are published (`CUTOFF_YEARS_BACK = 2`). The source starts in 2018, which buried subscribers under years of
   past entries. An event straddling the cutoff is kept in full. Retained events
   keep their UIDs, so existing subscriptions see no re-sync.
 - Sanity gate rejects a feed where fewer than `MIN_EXPECTED_PUBLISHED` events
