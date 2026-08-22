@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Cutoff: only events reaching into the current or previous calendar year are
+  published. The source starts in 2018, which buried subscribers under years of
+  past entries. An event straddling the cutoff is kept in full. Retained events
+  keep their UIDs, so existing subscriptions see no re-sync.
+- Sanity gate rejects a feed where fewer than `MIN_EXPECTED_PUBLISHED` events
+  survive the cutoff.
+
+### Changed
+- Docs: added a "Verifying the feed" section covering the missing `charset`
+  parameter on GitHub Pages and how to fetch the feed correctly in PowerShell.
+
 ## [1.0.0] - 2026-08-20
 
 ### Added
