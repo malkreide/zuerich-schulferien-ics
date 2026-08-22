@@ -25,6 +25,11 @@ RFC 5545-compliant `.ics` file, and deploys it to GitHub Pages.
 
 ## Subscribe
 
+A human-readable landing page with step-by-step subscription instructions is
+published at
+[malkreide.github.io/zuerich-schulferien-ics](https://malkreide.github.io/zuerich-schulferien-ics/)
+— point non-technical users there rather than at this README.
+
 Stable feed URL:
 
 ```
@@ -108,16 +113,18 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 
 ```bash
 pip install -r requirements.txt
-python generate_ics.py    # writes public/ferien.ics
+python generate_ics.py    # writes public/ferien.ics + public/index.html
 ```
 
 ## Project Structure
 
 ```
 zuerich-schulferien-ics/
-├── generate_ics.py           # fetch CKAN → build ICS → sanity gate
+├── generate_ics.py           # fetch CKAN → build ICS + page → sanity gate
 ├── requirements.txt
+├── web/index.html            # landing page template (subscription instructions)
 ├── public/ferien.ics         # generated feed (deployed to GitHub Pages)
+├── public/index.html         # rendered landing page (deployed alongside)
 └── .github/workflows/deploy.yml  # nightly cron + manual trigger, OIDC deploy
 ```
 

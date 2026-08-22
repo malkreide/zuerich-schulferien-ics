@@ -27,6 +27,10 @@ eine RFC-5545-konforme `.ics`-Datei und publiziert sie auf GitHub Pages.
 
 ## Abonnieren
 
+Eine Landing-Page mit Schritt-für-Schritt-Anleitung liegt unter
+[malkreide.github.io/zuerich-schulferien-ics](https://malkreide.github.io/zuerich-schulferien-ics/)
+— nicht-technische Nutzerinnen und Nutzer besser dorthin schicken als in dieses README.
+
 Stabile Feed-URL:
 
 ```
@@ -111,16 +115,18 @@ diesem Verhalten nicht betroffen.
 
 ```bash
 pip install -r requirements.txt
-python generate_ics.py    # schreibt public/ferien.ics
+python generate_ics.py    # schreibt public/ferien.ics + public/index.html
 ```
 
 ## Projektstruktur
 
 ```
 zuerich-schulferien-ics/
-├── generate_ics.py           # CKAN abrufen → ICS bauen → Sanity-Gate
+├── generate_ics.py           # CKAN abrufen → ICS + Seite bauen → Sanity-Gate
 ├── requirements.txt
+├── web/index.html            # Vorlage der Landing-Page (Abo-Anleitung)
 ├── public/ferien.ics         # generierter Feed (deployt auf GitHub Pages)
+├── public/index.html         # gerenderte Landing-Page (wird mitdeployt)
 └── .github/workflows/deploy.yml  # nächtlicher Cron + manueller Start, OIDC-Deploy
 ```
 

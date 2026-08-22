@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schulferien Stadt Zürich – Kalender abonnieren</title>
+<meta name="description" content="Abonnierbarer iCal-Feed mit den Ferien und schulfreien Tagen der Volksschule der Stadt Zürich. Aus den Daten von Open Data Zürich, täglich aktualisiert.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📅</text></svg>">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-alt: #f0f2f5;
+    --text: #16191d;
+    --text-muted: #5b636d;
+    --border: #d9dde3;
+    --accent: #0f5ea8;
+    --accent-contrast: #ffffff;
+    --code-bg: #eef1f5;
+    --warn-bg: #fff6e5;
+    --warn-border: #e0a02a;
+    --warn-text: #6b4a06;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --surface: #1c2026;
+      --surface-alt: #232830;
+      --text: #e8eaed;
+      --text-muted: #a3abb6;
+      --border: #333a44;
+      --accent: #6db3f2;
+      --accent-contrast: #10141a;
+      --code-bg: #262c35;
+      --warn-bg: #33280f;
+      --warn-border: #b8860b;
+      --warn-text: #f0d9a0;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+
+  header { margin-bottom: 2.5rem; }
+  h1 { font-size: clamp(1.6rem, 4.5vw, 2.2rem); line-height: 1.2; margin: 0 0 .5rem; letter-spacing: -.02em; }
+  .lede { font-size: 1.05rem; color: var(--text-muted); margin: 0; }
+
+  h2 {
+    font-size: 1.2rem; margin: 2.5rem 0 .85rem;
+    padding-bottom: .4rem; border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1rem; margin: 1.5rem 0 .4rem; }
+  p { margin: 0 0 1rem; }
+  a { color: var(--accent); }
+  a:hover { text-decoration: none; }
+
+  /* Feed URL block */
+  .feed {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.1rem 1.15rem; margin: 0 0 1.25rem;
+  }
+  .feed-label {
+    font-size: .78rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted); margin: 0 0 .5rem; font-weight: 600;
+  }
+  .feed-row { display: flex; gap: .6rem; align-items: stretch; flex-wrap: wrap; }
+  .feed-url {
+    flex: 1 1 18rem; min-width: 0;
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 7px;
+    padding: .6rem .7rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .82rem; color: var(--text);
+    overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+  }
+  button.copy {
+    flex: 0 0 auto; cursor: pointer;
+    background: var(--accent); color: var(--accent-contrast);
+    border: 1px solid transparent; border-radius: 7px;
+    padding: .6rem 1.1rem; font-size: .88rem; font-weight: 600; font-family: inherit;
+  }
+  button.copy:hover { filter: brightness(1.08); }
+  button.copy:active { transform: translateY(1px); }
+  button.copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Platform cards */
+  .platform {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.1rem 1.15rem; margin-bottom: .9rem;
+  }
+  .platform h3 { margin-top: 0; }
+  .platform p:last-child, .platform ol:last-child { margin-bottom: 0; }
+  ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+  ol li { margin-bottom: .35rem; }
+
+  .btn-link {
+    display: inline-block; margin: .25rem 0 .1rem;
+    background: var(--accent); color: var(--accent-contrast);
+    text-decoration: none; border-radius: 7px;
+    padding: .55rem 1rem; font-size: .9rem; font-weight: 600;
+  }
+  .btn-link:hover { filter: brightness(1.08); text-decoration: none; }
+
+  code {
+    background: var(--code-bg); border-radius: 4px; padding: .12em .38em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .86em; word-break: break-all;
+  }
+
+  .note {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    color: var(--warn-text); border-radius: var(--radius);
+    padding: .85rem 1rem; margin: 0 0 1rem; font-size: .93rem;
+  }
+  .note strong { font-weight: 700; }
+  .note p:last-child { margin-bottom: 0; }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.5rem;
+    background: var(--surface-alt); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: .9rem 1.1rem; margin: 0 0 1rem;
+    font-size: .88rem; color: var(--text-muted);
+  }
+  .meta div { min-width: 8rem; }
+  .meta b { display: block; color: var(--text); font-size: .95rem; font-weight: 600; }
+
+  ul.plain { margin: 0 0 1rem; padding-left: 1.2rem; }
+  ul.plain li { margin-bottom: .35rem; }
+
+  footer {
+    margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border);
+    font-size: .88rem; color: var(--text-muted);
+  }
+  footer p { margin: 0 0 .6rem; }
+
+  .disclaimer {
+    border-left: 3px solid var(--border); padding-left: .9rem;
+    color: var(--text-muted); font-size: .93rem; margin: 0 0 1.5rem;
+  }
+
+  @media (max-width: 30rem) {
+    body { padding: 1.5rem 1rem 3rem; }
+    button.copy, .feed-url { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <h1>Schulferien Stadt Zürich</h1>
+    <p class="lede">
+      Ferien und schulfreie Tage der Volksschule der Stadt Zürich – einmal
+      abonnieren, danach aktualisiert sich der Kalender von selbst.
+    </p>
+  </header>
+
+  <p class="disclaimer">
+    Unabhängiges Open-Source-Projekt, kein offizielles Angebot der Stadt Zürich.
+    Datenquelle ist der Datensatz
+    <a href="https://data.stadt-zuerich.ch/dataset/ssd_schulferien">ssd_schulferien</a>
+    von Open Data Zürich. Verbindlich sind immer die Angaben der Schule.
+  </p>
+
+  <h2>Feed-Adresse</h2>
+
+  <div class="feed">
+    <p class="feed-label">Diese Adresse im Kalender eintragen</p>
+    <div class="feed-row">
+      <div class="feed-url" id="feed-url">https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics</div>
+      <button class="copy" id="copy-btn" type="button" data-url="https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Kopieren</button>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div><b>{{EVENT_COUNT}}</b> Termine im Feed</div>
+    <div><b>bis {{RANGE_END}}</b> im Voraus</div>
+    <div><b>{{UPDATED}}</b> zuletzt aktualisiert</div>
+  </div>
+
+  <h2>Abonnieren</h2>
+
+  <div class="platform">
+    <h3>iPhone, iPad, Mac (Apple Kalender) und Outlook</h3>
+    <p>Den folgenden Link antippen und das Abo bestätigen:</p>
+    <p><a class="btn-link" href="webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Kalender abonnieren</a></p>
+    <p>
+      Falls der Link nicht greift: in der Kalender-App
+      <em>Ablage → Neues Kalenderabonnement</em> (macOS) bzw.
+      <em>Einstellungen → Kalender → Accounts → Account hinzufügen → Andere →
+      Kalenderabo hinzufügen</em> (iOS) wählen und die Feed-Adresse von oben einfügen.
+    </p>
+  </div>
+
+  <div class="platform">
+    <h3>Android und Google Kalender</h3>
+    <div class="note">
+      <p>
+        <strong>Nicht</strong> die Feed-Adresse direkt im Browser öffnen. Android
+        lädt dann eine einmalige Kopie herunter, die sich nie wieder aktualisiert.
+        Stattdessen den Link unten benutzen.
+      </p>
+    </div>
+    <p><a class="btn-link" href="https://calendar.google.com/calendar/r?cid=https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Zu Google Kalender hinzufügen</a></p>
+    <p>
+      Google fragt nach einer Bestätigung. Das Abo wird im Google-Konto angelegt
+      und erscheint danach automatisch auf allen angemeldeten Geräten. Der Abgleich
+      auf Google-Seite kann beim ersten Mal einige Stunden dauern.
+    </p>
+  </div>
+
+  <div class="platform">
+    <h3>Thunderbird, Nextcloud, Synology und andere</h3>
+    <ol>
+      <li>Einen neuen Kalender anlegen und als Typ <em>Im Netzwerk</em>,
+          <em>Abonnement</em> oder <em>iCal/ICS-Link</em> wählen.</li>
+      <li>Die Feed-Adresse von oben als URL einfügen.</li>
+      <li>Als Format <code>iCalendar (ICS)</code> wählen, keine Anmeldedaten nötig.</li>
+    </ol>
+    <p>
+      Der Feed empfiehlt den Clients eine Aktualisierung alle 24 Stunden
+      (<code>REFRESH-INTERVAL</code>). Manche Programme fragen seltener nach –
+      das Intervall lässt sich dort meist von Hand einstellen.
+    </p>
+  </div>
+
+  <h2>Was drin ist</h2>
+
+  <ul class="plain">
+    <li>Ferien und einzelne schulfreie Tage der Volksschule der Stadt Zürich.</li>
+    <li>Ganztagestermine – sie belegen keine Uhrzeit und blockieren deine
+        Verfügbarkeit nicht (<code>TRANSP:TRANSPARENT</code>).</li>
+    <li>Der Feed wird nachts automatisch neu erzeugt. Ändert die Stadt ein Datum,
+        wandert die Korrektur ohne dein Zutun in dein Abo.</li>
+    <li>Vergangene Schuljahre werden ab dem 1. Januar des vorletzten Jahres
+        abgeschnitten, damit der Kalender nicht mit Altlasten bis 2018 zuläuft.</li>
+  </ul>
+
+  <h2>Wenn etwas nicht stimmt</h2>
+
+  <p>
+    Zeigt der Kalender <em>Zürich</em> als <code>ZÃ¼rich</code> an, hat das
+    abrufende Programm die Zeichenkodierung falsch geraten – der Feed selbst ist
+    UTF-8 und korrekt. Kalender-Apps sind davon nicht betroffen; es tritt nur
+    beim Abruf über manche Kommandozeilen-Werkzeuge auf. Details dazu stehen in
+    der <a href="https://github.com/malkreide/zuerich-schulferien-ics#verifying-the-feed">Projekt-Dokumentation</a>.
+  </p>
+  <p>
+    Fehlende oder falsche Termine bitte als
+    <a href="https://github.com/malkreide/zuerich-schulferien-ics/issues">Issue auf GitHub</a>
+    melden. Stammt der Fehler aus den Originaldaten, kann ihn nur die Stadt
+    Zürich korrigieren – der Feed gibt sie unverändert weiter.
+  </p>
+
+  <footer>
+    <p>
+      Quelltext und Dokumentation:
+      <a href="https://github.com/malkreide/zuerich-schulferien-ics">github.com/malkreide/zuerich-schulferien-ics</a>
+      · MIT-Lizenz
+    </p>
+    <p>
+      Daten: <a href="https://data.stadt-zuerich.ch/dataset/ssd_schulferien">Open Data Zürich, ssd_schulferien</a>.
+      Diese Seite wird automatisch mit dem Feed veröffentlicht.
+    </p>
+  </footer>
+
+</main>
+
+<script>
+  (function () {
+    var btn = document.getElementById('copy-btn');
+    if (!btn) return;
+    var original = btn.textContent;
+    var timer = null;
+
+    function flash(message) {
+      btn.textContent = message;
+      clearTimeout(timer);
+      timer = setTimeout(function () { btn.textContent = original; }, 1800);
+    }
+
+    // Selects the URL text so the user can copy manually when the
+    // Clipboard API is unavailable (older browsers, non-secure contexts).
+    function selectUrl() {
+      var node = document.getElementById('feed-url');
+      if (!node || !window.getSelection) return;
+      var range = document.createRange();
+      range.selectNodeContents(node);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    btn.addEventListener('click', function () {
+      var url = btn.getAttribute('data-url');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(
+          function () { flash('Kopiert'); },
+          function () { selectUrl(); flash('Bitte selbst kopieren'); }
+        );
+      } else {
+        selectUrl();
+        flash('Bitte selbst kopieren');
+      }
+    });
+  })();
+</script>
+
+</body>
+</html>
