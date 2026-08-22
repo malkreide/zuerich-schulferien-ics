@@ -19,11 +19,16 @@ Design decisions
   are published (see ``CUTOFF_YEARS_BACK``). The source goes back to 2018, which
   buries subscribers under years of irrelevant past entries. An event that
   straddles the cutoff (e.g. Weihnachtsferien 2024/25) is kept in full.
+- The landing page (``web/index.html``) is rendered into ``public/`` by the same
+  run that writes the feed. Both artifacts therefore pass the same sanity gate:
+  a broken CKAN response leaves the last known-good page *and* feed in place,
+  and the page can never advertise numbers the feed does not contain.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +41,8 @@ RESOURCE_ID = "aad477f6-db39-4d1b-92d8-0885f2d363d1"
 PAGE_SIZE = 1000
 OUTPUT_DIR = Path("public")
 OUTPUT_FILE = OUTPUT_DIR / "ferien.ics"
+PAGE_TEMPLATE = Path("web/index.html")
+PAGE_FILE = OUTPUT_DIR / "index.html"
 UID_DOMAIN = "zuerich-schulferien-ics.malkreide.github.io"
 
 # Publish events from the start of this many calendar years ago. 2 => on any
@@ -206,16 +213,55 @@ def sanity_check(
         )
 
 
+def render_page(
+    events: list[tuple[str, date, date]], built: date, template: Path
+) -> str:
+    """Fill the landing page template with what this run actually produced.
+
+    The page states an event count and a coverage end date. Those must come
+    from the generated feed rather than being hand-maintained in the HTML,
+    otherwise the page starts lying the moment the data shifts. An unresolved
+    or unknown placeholder is a hard error: a page rendering a literal
+    ``{{EVENT_COUNT}}`` to subscribers is worse than a failed build.
+    """
+    # ``events`` holds exclusive iCal end dates; the last day a subscriber
+    # actually sees is the day before.
+    last_day = max(end for _, _, end in events) - timedelta(days=1)
+
+    values = {
+        "EVENT_COUNT": str(len(events)),
+        "RANGE_END": last_day.strftime("%d.%m.%Y"),
+        "UPDATED": built.strftime("%d.%m.%Y"),
+    }
+
+    html = template.read_text(encoding="utf-8")
+    for key, value in values.items():
+        html = html.replace("{{" + key + "}}", value)
+
+    leftover = re.findall(r"\{\{[A-Z_]+\}\}", html)
+    if leftover:
+        raise RuntimeError(
+            f"Unresolved placeholders in {template}: {sorted(set(leftover))}"
+        )
+    return html
+
+
 def main() -> int:
     records = fetch_all_records()
-    cutoff = cutoff_date(date.today())
+    today = date.today()
+    cutoff = cutoff_date(today)
     events = select_events(records, cutoff)
     cal = build_calendar(events)
     ics_bytes = cal.to_ical()
     sanity_check(records, events, ics_bytes)
 
+    # Rendered before the first write so a template error aborts the run while
+    # the previously deployed feed is still the last thing on Pages.
+    page_html = render_page(events, today, PAGE_TEMPLATE)
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_FILE.write_bytes(ics_bytes)
+    PAGE_FILE.write_text(page_html, encoding="utf-8")
 
     latest = max(parse_date(r["end_date"]) for r in records)
     print(
@@ -224,6 +270,7 @@ def main() -> int:
         f"{len(records) - len(events)} past events skipped, "
         f"latest event ends {latest})."
     )
+    print(f"OK: landing page written to {PAGE_FILE} ({len(page_html)} chars).")
     return 0
 
 
