@@ -76,6 +76,7 @@ diesem Verhalten nicht betroffen.
 ## Funktionen
 
 - Nächtliche automatische Aktualisierung aus der Single Source of Truth (CKAN-Datastore)
+- Zeitfenster ab Beginn des Vorjahres — keine Altlasten zurück bis 2018 im Kalender
 - Ganztägige Termine (`VALUE=DATE`) mit korrekt exklusiven Enddaten
 - Deterministische SHA-256-UIDs — keine Termin-Duplikate bei Neugenerierung
 - `TRANSP:TRANSPARENT` — Ferien blockieren nie die Frei/Gebucht-Anzeige
@@ -91,6 +92,11 @@ diesem Verhalten nicht betroffen.
   `+1 Tag`-Korrektur an — sie würde jeden Ferientermin einen Tag zu lang machen.
 - Einzelne eintägige Einträge liefern `end_date == start_date`; diese werden
   zu korrekten Eintages-Terminen normalisiert.
+- Der Feed beginnt am 1. Januar des Vorjahres (`CUTOFF_YEARS_BACK = 1`). Der
+  CKAN-Datensatz reicht zurück bis 2018; ungefiltert wären rund zwei Drittel
+  der Termine reine Vergangenheit. Ein Termin, der über die Grenze reicht
+  (etwa die Weihnachtsferien 2024/25), bleibt **vollständig** erhalten — der
+  Filter kürzt nie einen laufenden Termin.
 - Die UIDs hashen `(summary, start, end)`. Eine Datumsänderung erscheint in
   den Clients als «alter Termin entfernt, neuer Termin hinzugefügt» statt als
   In-Place-Update. Das ist beabsichtigt: Der Generator bleibt zustandslos.
