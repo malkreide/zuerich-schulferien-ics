@@ -73,7 +73,7 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 ## Features
 
 - Nightly automated refresh from the single source of truth (CKAN datastore)
-- Cutoff at the start of last year — no backlog reaching to 2018 in your calendar
+- Cutoff at the start of the year before last — no backlog reaching to 2018 in your calendar
 - All-day events (`VALUE=DATE`) with correct exclusive end dates
 - Deterministic SHA-256 UIDs — no duplicate events on feed regeneration
 - `TRANSP:TRANSPARENT` — holidays never block your free/busy availability
@@ -89,10 +89,11 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
   holiday a day too long.
 - Some single-day records ship `end_date == start_date`; these are normalised
   to proper one-day events.
-- The feed starts on 1 January of last year (`CUTOFF_YEARS_BACK = 1`). The
+- The feed starts on 1 January of the year before last (`CUTOFF_YEARS_BACK = 2`,
+  i.e. `2024-01-01` on 2026-08-22). The
   CKAN dataset reaches back to 2018; unfiltered, roughly two thirds of the
   entries would be pure history. An event straddling the cutoff (e.g.
-  Weihnachtsferien 2024/25) is kept **in full** — the filter never truncates
+  Weihnachtsferien 2023/24) is kept **in full** — the filter never truncates
   an ongoing holiday.
 - UIDs hash `(summary, start, end)`. A changed date syncs to clients as
   "old event removed, new event added" rather than an in-place update. This

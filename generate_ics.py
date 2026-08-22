@@ -15,8 +15,8 @@ Design decisions
   which is acceptable for an informational feed and avoids state management.
 - The script fails hard (non-zero exit) on implausible data so that a broken
   CKAN response never overwrites the last known-good feed on GitHub Pages.
-- Only events reaching into the current or previous calendar year are
-  published (see ``CUTOFF_YEARS_BACK``). The source goes back to 2018, which
+- Only events reaching into the current or the two preceding calendar years
+  are published (see ``CUTOFF_YEARS_BACK``). The source goes back to 2018, which
   buries subscribers under years of irrelevant past entries. An event that
   straddles the cutoff (e.g. Weihnachtsferien 2024/25) is kept in full.
 """
@@ -38,9 +38,9 @@ OUTPUT_DIR = Path("public")
 OUTPUT_FILE = OUTPUT_DIR / "ferien.ics"
 UID_DOMAIN = "zuerich-schulferien-ics.malkreide.github.io"
 
-# Publish events from the start of this many calendar years ago. 1 => on any
-# day in 2026 the feed starts at 2025-01-01.
-CUTOFF_YEARS_BACK = 1
+# Publish events from the start of this many calendar years ago. 2 => on any
+# day in 2026 the feed starts at 2024-01-01.
+CUTOFF_YEARS_BACK = 2
 
 # Sanity gate thresholds
 MIN_EXPECTED_EVENTS = 30
