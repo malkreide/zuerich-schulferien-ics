@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+secrets.yaml
+config.local.*
+.venv/
+venv/
+*.log
+.DS_Store
+
+# Generated feed output (built by CI)
+public/

@@ -1,0 +1,22 @@
+# Ziel: .github/dependabot.yml — NICHT .github/workflows/. Liegt hier nur,
+# weil das Bundle alle .github-Vorlagen an einem Ort haelt.
+#
+# B4 macht Pinning erst tragfaehig: gepinnte SHAs frieren sonst auf dem Stand
+# des Tages ein, an dem das Repo entstand. Dependabot zieht Hash UND
+# Versionskommentar gemeinsam nach, sodass die Zeile lesbar bleibt.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Ein PR pro Woche fuer alle Actions statt einer pro Action. Bei vielen
+    # Repos ist die Zahl der PRs das eigentliche Problem, nicht ihr Inhalt:
+    # was einzeln aufschlaegt, wird nicht gelesen, sondern weggeklickt.
+    groups:
+      github-actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"

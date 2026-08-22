@@ -1,0 +1,12 @@
+[project]
+name = "zuerich-schulferien-ics"
+version = "1.0.0"
+description = "Subscribable iCal feed for Zurich public school holidays, generated from Open Data Zurich (CKAN)"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]

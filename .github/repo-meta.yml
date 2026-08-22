@@ -1,0 +1,17 @@
+# .github/repo-meta.yml — von der github-repo Skill gepflegt
+repo_name: zuerich-schulferien-ics
+title: Zürich Schulferien ICS Feed
+description: Subscribable iCal feed for Zurich public school holidays, generated from Open Data Zurich (CKAN)
+topics: [icalendar, ics, swiss-open-data, open-data, zurich, github-actions, python, education]
+project_type: other
+visibility: public
+license: MIT
+author_legal_name: "{AUTHOR_LEGAL_NAME}"   # offen — vor LICENSE-Commit ersetzen
+github_user: malkreide
+default_branch: main
+language: python
+version: 1.0.0
+confirmed: true
+offen:
+  - author_legal_name in LICENSE und READMEs einsetzen
+  - Topics nach Repo-Anlage setzen (gh repo edit --add-topic)
