@@ -12,5 +12,3 @@ default_branch: main
 language: python
 version: 1.1.0
 confirmed: true
-offen:
-  - Topics nach Repo-Anlage setzen (gh repo edit --add-topic)
