@@ -78,13 +78,30 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 ## Features
 
 - Nightly automated refresh from the single source of truth (CKAN datastore)
+- **School entries only** — plain public holidays are filtered out, since they
+  almost always fall inside a school-free block or on a weekend anyway
+- **Titles fit a calendar** — the `Schulen Stadt Zürich schulfrei:` prefix is
+  dropped and trailing parentheticals move into the description
+- **`Schulschluss 12 Uhr` is a timed event at noon**, not an all-day one — that
+  day is a short school day, not a day off
 - Cutoff at the start of the year before last — no backlog reaching to 2018 in your calendar
 - All-day events (`VALUE=DATE`) with correct exclusive end dates
-- Deterministic SHA-256 UIDs — no duplicate events on feed regeneration
+- Deterministic SHA-256 UIDs over the raw source record — title changes update
+  existing subscriptions in place instead of resyncing them
 - `TRANSP:TRANSPARENT` — holidays never block your free/busy availability
 - Sanity gate: implausible or truncated API responses fail the pipeline
   instead of overwriting the last known-good feed
+- Fixture-based `pytest` suite that runs offline in CI
 - Zero servers, zero secrets: GitHub Actions (OIDC) + GitHub Pages
+
+## What the feed does not cover
+
+- **Public holidays.** They exist in the source dataset but are deliberately
+  excluded (see above). Calendar apps ship a Swiss holiday calendar of their own.
+- **School-specific dates.** Staff training days, parent-teacher meetings and
+  project weeks are set per school and are not part of the city-wide dataset.
+- **Childcare.** A school-free day says nothing about whether after-school care
+  or holiday childcare is open. No open data exists for this — ask your school.
 
 ## Data quirks worth knowing
 
@@ -92,17 +109,27 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
   2026 run Feb 9–20 and are stored as `2026-02-09 → 2026-02-21`. The script
   therefore applies **no** `+1 day` correction — adding one would make every
   holiday a day too long.
+- The dataset mixes school entries (prefixed `Schulen Stadt Zürich`) with plain
+  public holidays. In the window from 2024 that is 76 school entries against 97
+  holidays — 94 of which fall entirely inside an already school-free block, and
+  22 of which land on weekends only. Only the school entries are published.
+- Source titles run up to 137 characters. After cleanup the longest is 42; the
+  remainder is preserved as the event `DESCRIPTION`.
 - Some single-day records ship `end_date == start_date`; these are normalised
   to proper one-day events.
+- Minor source inconsistencies — `Schulschluss 12 Uhr` alongside
+  `Schulschluss um 12 Uhr`, `(KW29-33)` alongside `(KW 29-33)` — are normalised.
 - The feed starts on 1 January of the year before last (`CUTOFF_YEARS_BACK = 2`,
   i.e. `2024-01-01` on 2026-08-22). The
   CKAN dataset reaches back to 2018; unfiltered, roughly two thirds of the
   entries would be pure history. An event straddling the cutoff (e.g.
   Weihnachtsferien 2023/24) is kept **in full** — the filter never truncates
   an ongoing holiday.
-- UIDs hash `(summary, start, end)`. A changed date syncs to clients as
-  "old event removed, new event added" rather than an in-place update. This
-  is intentional: it keeps the generator stateless.
+- UIDs hash `(raw summary, start, end)` — deliberately the *uncleaned* summary,
+  so shortening a title updates existing subscriptions in place instead of
+  resyncing them. A changed date still syncs to clients as "old event removed,
+  new event added" rather than an in-place update. This is intentional: it keeps
+  the generator stateless.
 
 ## Prerequisites
 
@@ -112,7 +139,8 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 ## Usage
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pytest -q                 # test suite, runs offline against fixtures
 python generate_ics.py    # writes public/ferien.ics + public/index.html
 ```
 
@@ -120,8 +148,10 @@ python generate_ics.py    # writes public/ferien.ics + public/index.html
 
 ```
 zuerich-schulferien-ics/
-├── generate_ics.py           # fetch CKAN → build ICS + page → sanity gate
+├── generate_ics.py           # fetch CKAN → filter → build ICS + page → sanity gate
+├── tests/                    # pytest suite on fixtures, no network access
 ├── requirements.txt
+├── requirements-dev.txt
 ├── web/index.html            # landing page template (subscription instructions)
 ├── public/ferien.ics         # generated feed (deployed to GitHub Pages)
 ├── public/index.html         # rendered landing page (deployed alongside)

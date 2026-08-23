@@ -80,13 +80,33 @@ diesem Verhalten nicht betroffen.
 ## Funktionen
 
 - Nächtliche automatische Aktualisierung aus der Single Source of Truth (CKAN-Datastore)
+- **Nur Schultermine** — allgemeine Feiertage werden herausgefiltert, weil sie
+  fast immer ohnehin in den Ferien oder auf einem Wochenende liegen
+- **Kalendertaugliche Titel** — das Präfix `Schulen Stadt Zürich schulfrei:`
+  entfällt, Klammerzusätze wandern in die Beschreibung
+- **`Schulschluss 12 Uhr` als Termin um 12 Uhr**, nicht als Ganztagestermin —
+  an diesem Tag ist nicht schulfrei
 - Zeitfenster ab Beginn des vorletzten Jahres — keine Altlasten zurück bis 2018 im Kalender
 - Ganztägige Termine (`VALUE=DATE`) mit korrekt exklusiven Enddaten
-- Deterministische SHA-256-UIDs — keine Termin-Duplikate bei Neugenerierung
+- Deterministische SHA-256-UIDs über die Rohdaten — Titeländerungen aktualisieren
+  bestehende Abos, statt sie neu zu synchronisieren
 - `TRANSP:TRANSPARENT` — Ferien blockieren nie die Frei/Gebucht-Anzeige
 - Sanity-Gate: unplausible oder unvollständige API-Antworten lassen die
   Pipeline fehlschlagen, statt den letzten guten Feed zu überschreiben
+- Testsuite auf Fixtures (`pytest`), läuft ohne Netz in der CI
 - Keine Server, keine Secrets: GitHub Actions (OIDC) + GitHub Pages
+
+## Was der Feed nicht abdeckt
+
+- **Allgemeine Feiertage.** Sie stehen im Originaldatensatz, sind hier aber
+  bewusst nicht enthalten (siehe oben). Kalender-Apps bringen dafür einen
+  eigenen Schweizer Feiertagskalender mit.
+- **Schulinterne Termine.** Weiterbildungstage, Elterngespräche oder
+  Projektwochen legt jede Schule selbst fest; sie sind nicht Teil des
+  stadtweiten Datensatzes.
+- **Betreuung.** Schulfrei heisst nicht automatisch, dass Hort oder
+  Ferienbetreuung geschlossen sind oder offen haben. Dazu gibt es keine
+  offenen Daten — Auskunft gibt die Schule.
 
 ## Wissenswerte Eigenheiten der Daten
 
@@ -102,9 +122,21 @@ diesem Verhalten nicht betroffen.
   der Termine reine Vergangenheit. Ein Termin, der über die Grenze reicht
   (etwa die Weihnachtsferien 2023/24), bleibt **vollständig** erhalten — der
   Filter kürzt nie einen laufenden Termin.
-- Die UIDs hashen `(summary, start, end)`. Eine Datumsänderung erscheint in
-  den Clients als «alter Termin entfernt, neuer Termin hinzugefügt» statt als
-  In-Place-Update. Das ist beabsichtigt: Der Generator bleibt zustandslos.
+- Der Datensatz mischt Schultermine (Präfix `Schulen Stadt Zürich`) mit
+  allgemeinen Feiertagen. Im Fenster ab 2024 sind das 76 Schultermine gegenüber
+  97 Feiertagen — von denen 94 vollständig in einem ohnehin schulfreien Block
+  liegen und 22 ausschliesslich auf Wochenenden. Publiziert werden nur die
+  Schultermine.
+- Die Titel sind Datenbankstrings bis 137 Zeichen Länge. Nach dem Kürzen bleiben
+  maximal 42 — der Rest steht als `DESCRIPTION` am Termin.
+- Kleinere Inkonsistenzen der Quelle: `Schulschluss 12 Uhr` neben
+  `Schulschluss um 12 Uhr`, `(KW29-33)` neben `(KW 29-33)`. Beides wird
+  normalisiert.
+- Die UIDs hashen `(roher summary, start, end)` — bewusst die *unbereinigte*
+  Zusammenfassung, damit eine Titeländerung bestehende Abos aktualisiert statt
+  sie neu zu synchronisieren. Eine Datums­änderung erscheint dagegen als «alter
+  Termin entfernt, neuer Termin hinzugefügt». Das ist beabsichtigt: Der
+  Generator bleibt zustandslos.
 
 ## Voraussetzungen
 
@@ -114,7 +146,8 @@ diesem Verhalten nicht betroffen.
 ## Verwendung
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pytest -q                 # Testsuite, läuft offline auf Fixtures
 python generate_ics.py    # schreibt public/ferien.ics + public/index.html
 ```
 
@@ -122,8 +155,10 @@ python generate_ics.py    # schreibt public/ferien.ics + public/index.html
 
 ```
 zuerich-schulferien-ics/
-├── generate_ics.py           # CKAN abrufen → ICS + Seite bauen → Sanity-Gate
+├── generate_ics.py           # CKAN abrufen → filtern → ICS + Seite bauen → Sanity-Gate
+├── tests/                    # pytest-Suite auf Fixtures, ohne Netzzugriff
 ├── requirements.txt
+├── requirements-dev.txt
 ├── web/index.html            # Vorlage der Landing-Page (Abo-Anleitung)
 ├── public/ferien.ics         # generierter Feed (deployt auf GitHub Pages)
 ├── public/index.html         # gerenderte Landing-Page (wird mitdeployt)

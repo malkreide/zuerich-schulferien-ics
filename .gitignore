@@ -10,6 +10,8 @@ build/
 credentials.json
 secrets.yaml
 config.local.*
+.pytest_cache/
+.ruff_cache/
 .venv/
 venv/
 *.log

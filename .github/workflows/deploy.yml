@@ -6,6 +6,8 @@ on:
   workflow_dispatch:        # manual trigger, e.g. after a new school year is published
   push:
     branches: [main]        # deploy on code changes too
+  pull_request:
+    branches: [main]        # test only — build and deploy are skipped below
 
 permissions:
   contents: read
@@ -13,11 +15,38 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  # Per-ref, so a pull request run never queues behind (or ahead of) a nightly
+  # deploy. Serialising the actual Pages deployment happens on the deploy job.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Runs on offline fixtures, so a CKAN outage can never turn the suite red.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check . && ruff format --check .
+
+      - name: Test
+        run: pytest -q
+
+  # A pull request gets the test job only: no Pages deployment from a branch,
+  # and no dependency on the live CKAN API to turn a review red.
   build:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,7 +70,11 @@ jobs:
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages          # GitHub Pages allows one deployment at a time
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
