@@ -78,6 +78,11 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 ## Features
 
 - Nightly automated refresh from the single source of truth (CKAN datastore)
+- **Year overview** on the landing page — current and next school year as a
+  table, no subscription needed
+- **Reproducible output** — `DTSTAMP` comes from the source data, not the wall
+  clock. Same input, same bytes: the nightly run no longer makes every
+  subscriber re-download the feed
 - **School entries only** — plain public holidays are filtered out, since they
   almost always fall inside a school-free block or on a weekend anyway
 - **Titles fit a calendar** — the `Schulen Stadt Zürich schulfrei:` prefix is

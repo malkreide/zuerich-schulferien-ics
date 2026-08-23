@@ -132,6 +132,26 @@
   .meta div { min-width: 8rem; }
   .meta b { display: block; color: var(--text); font-size: .95rem; font-weight: 600; }
 
+  /* Year overview */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 0 1.5rem; }
+  table.year {
+    border-collapse: collapse; width: 100%; min-width: 26rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); font-size: .93rem;
+  }
+  table.year th, table.year td {
+    text-align: left; padding: .55rem .8rem; border-bottom: 1px solid var(--border);
+  }
+  table.year thead th {
+    background: var(--surface-alt); font-size: .78rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+    white-space: nowrap;
+  }
+  table.year tbody tr:last-child td { border-bottom: 0; }
+  table.year td:nth-child(2) { white-space: nowrap; }
+  table.year td:nth-child(3) { white-space: nowrap; color: var(--text-muted); }
+  .hint { display: block; font-size: .82rem; color: var(--text-muted); font-weight: 400; }
+
   ul.plain { margin: 0 0 1rem; padding-left: 1.2rem; }
   ul.plain li { margin-bottom: .35rem; }
 
@@ -149,6 +169,14 @@
   @media (max-width: 30rem) {
     body { padding: 1.5rem 1rem 3rem; }
     button.copy, .feed-url { flex: 1 1 100%; }
+    /* Drop the duration column so the table fits a phone without sideways
+       scrolling. The dates already convey it, and a half day says so in its
+       title. */
+    table.year { min-width: 0; }
+    table.year th:nth-child(3), table.year td:nth-child(3) { display: none; }
+    /* Let a date range break across two lines rather than push the table wide. */
+    table.year td:nth-child(2) { white-space: normal; }
+    table.year th, table.year td { padding: .5rem .55rem; }
   }
 </style>
 </head>
@@ -185,6 +213,15 @@
     <div><b>bis {{RANGE_END}}</b> im Voraus</div>
     <div><b>{{UPDATED}}</b> zuletzt aktualisiert</div>
   </div>
+
+  <h2>Schuljahr auf einen Blick</h2>
+
+  <p>
+    Die Termine des laufenden und des kommenden Schuljahres — dieselben, die
+    auch im Feed stehen. Wer nur nachschauen will, muss nichts abonnieren.
+  </p>
+
+{{YEAR_TABLES}}
 
   <h2>Abonnieren</h2>
 

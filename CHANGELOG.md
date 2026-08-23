@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Year overview on the landing page: the current and next school year as
+  tables, rendered from the same events as the feed. Most visitors want to look
+  a date up rather than subscribe, and that was not served at all. Building it
+  from the feed's own events means the page can never show a date the feed does
+  not contain.
+
+### Changed
+- `DTSTAMP` comes from the source record's `created_date` instead of the wall
+  clock. Every nightly run previously emitted a byte-different file even when
+  nothing had changed, rotating the ETag so every subscriber re-downloaded the
+  whole feed. Identical input now produces identical bytes. Comparing against
+  the previously deployed file was not an option: CI checks out a fresh tree
+  and `public/` is generated, so there is nothing to compare against.
+
+### Fixed
+- A half-day title that differs from the canonical form only in spelling
+  (`Schulschluss um 12 Uhr` vs `Schulschluss 12 Uhr`) no longer repeats itself
+  in the description. Four events in the deployed feed carried
+  `Der Unterricht endet an diesem Tag um 12 Uhr. Schulschluss um 12 Uhr`.
+  Wording that survives the spelling-variant folding is still kept.
+
+### Added
 - `Schulschluss 12 Uhr` is now published as a timed event at 12:00
   Europe/Zurich (with a matching `VTIMEZONE`) instead of an all-day event.
   It was the one entry where the day is *not* free, and rendering it like a

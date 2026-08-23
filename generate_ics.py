@@ -30,6 +30,12 @@ Design decisions
   instead of resyncing. A changed *date* still appears as "old event
   removed, new event added", which is acceptable for an informational feed
   and avoids state management.
+- DTSTAMP comes from the source record's ``created_date``, never from the wall
+  clock. A wall-clock stamp made every nightly run emit a byte-different file
+  even when nothing had changed, so the ETag rotated and every subscriber
+  re-downloaded the whole feed. Identical input now produces identical bytes.
+  Comparing against the previously deployed file is not an option: CI checks
+  out a fresh tree and ``public/`` is generated, so there is nothing to compare.
 - The script fails hard (non-zero exit) on implausible data so that a broken
   CKAN response never overwrites the last known-good feed on GitHub Pages.
 - Only events reaching into the current or the two preceding calendar years
@@ -45,6 +51,7 @@ Design decisions
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 import sys
 from dataclasses import dataclass
@@ -91,6 +98,12 @@ HALF_DAY_START = time(12, 0)
 HALF_DAY_DURATION = timedelta(minutes=30)
 LOCAL_TZ = ZoneInfo("Europe/Zurich")
 
+# German weekday abbreviations for the landing page's year overview.
+WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+# A Zurich school year runs from August to July: the summer holidays starting
+# in July belong to the year that is ending, which is how parents read them.
+SCHOOL_YEAR_START_MONTH = 8
+
 # Sanity gate thresholds
 MIN_EXPECTED_EVENTS = 30
 MIN_EXPECTED_PUBLISHED = 20
@@ -108,8 +121,14 @@ class SchoolEvent:
     start: date
     end: date  # exclusive, iCal convention
     uid: str
+    stamp: datetime  # DTSTAMP, from the source record — never the wall clock
     note: str | None = None
     half_day: bool = False
+
+    @property
+    def last_day(self) -> date:
+        """The last day a subscriber actually sees (``end`` is exclusive)."""
+        return self.end - timedelta(days=1)
 
     @property
     def description(self) -> str | None:
@@ -155,6 +174,20 @@ def parse_date(value: str) -> date:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
 
 
+def parse_stamp(rec: dict, start: date) -> datetime:
+    """DTSTAMP for a record: when the source authored it, in UTC.
+
+    Deliberately not ``datetime.now()``. Every record in the dataset carries
+    ``created_date``; the fallback for one that does not is still derived from
+    the record itself, so the output stays a pure function of the input.
+    """
+    raw = rec.get("created_date")
+    if raw:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc)
+    return datetime.combine(start, time(0, 0), tzinfo=timezone.utc)
+
+
 def make_uid(raw_summary: str, start: date, end: date) -> str:
     """Derive a stable UID from the *source* record, not the display title.
 
@@ -164,6 +197,17 @@ def make_uid(raw_summary: str, start: date, end: date) -> str:
     raw = f"volksschule-zuerich-{raw_summary}-{start.isoformat()}-{end.isoformat()}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return f"{digest}@{UID_DOMAIN}"
+
+
+def half_day_key(text: str) -> str:
+    """Fold the source's half-day spelling variants onto one comparable form.
+
+    ``Schulschluss um 12.00 Uhr`` and ``Schulschluss 12 Uhr`` say the same
+    thing, so canonicalising the first must not append the second as a note.
+    Wording that survives this folding is genuine extra information and is kept.
+    """
+    text = re.sub(r"\b12[.:]00\b", "12", text.lower())
+    return " ".join(re.sub(r"\bum\b", " ", text).split())
 
 
 def is_school_record(summary: str) -> bool:
@@ -238,8 +282,9 @@ def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
         # anything longer would silently lose its remaining days.
         half_day = bool(HALF_DAY_RE.match(summary)) and (end - start).days == 1
         if half_day:
-            if summary != HALF_DAY_TITLE:
-                # Canonicalise the title but never drop the source's wording.
+            if half_day_key(summary) != half_day_key(HALF_DAY_TITLE):
+                # Canonicalise the title but never drop wording that adds
+                # something — a mere spelling variant adds nothing.
                 note = " · ".join(p for p in (summary, note) if p)
             summary = HALF_DAY_TITLE
 
@@ -249,6 +294,7 @@ def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
                 start=start,
                 end=end,
                 uid=uid,
+                stamp=parse_stamp(rec, start),
                 note=note,
                 half_day=half_day,
             )
@@ -291,8 +337,6 @@ def build_calendar(events: list[SchoolEvent]) -> Calendar:
             )
         )
 
-    now_utc = datetime.now(timezone.utc)
-
     for ev in events:
         event = Event()
         event.add("uid", vText(ev.uid))
@@ -309,7 +353,7 @@ def build_calendar(events: list[SchoolEvent]) -> Calendar:
         if ev.description:
             event.add("description", ev.description)
 
-        event.add("dtstamp", now_utc)
+        event.add("dtstamp", ev.stamp)
         event.add("transp", "TRANSPARENT")  # do not block free/busy time
         event.add("categories", ["Schulferien"])
         cal.add_component(event)
@@ -370,6 +414,86 @@ def cutoff_date(today: date) -> date:
     return date(today.year - CUTOFF_YEARS_BACK, 1, 1)
 
 
+def school_year(day: date) -> int:
+    """Starting year of the school year `day` falls into. Aug 2026 → 2026."""
+    return day.year if day.month >= SCHOOL_YEAR_START_MONTH else day.year - 1
+
+
+def format_day(day: date, with_year: bool = True) -> str:
+    """`Sa 3.10.2026` — weekday included because parents plan around it."""
+    text = f"{WEEKDAYS[day.weekday()]} {day.day}.{day.month}."
+    return f"{text}{day.year}" if with_year else text
+
+
+def format_period(event: SchoolEvent) -> tuple[str, str]:
+    """Human-readable (period, duration) for one event."""
+    if event.half_day:
+        return format_day(event.start), "halber Tag"
+
+    days = (event.end - event.start).days
+    if days == 1:
+        return format_day(event.start), "1 Tag"
+
+    last = event.last_day
+    # The year is stated once unless the holiday crosses New Year.
+    start_text = format_day(event.start, with_year=event.start.year != last.year)
+    return f"{start_text} – {format_day(last)}", f"{days} Tage"
+
+
+def keep_dates_together(text: str) -> str:
+    """Bind ``Mo 5.10.`` with a non-breaking space.
+
+    On a phone the cell has to wrap somewhere. Left alone it breaks at every
+    space and a range becomes four lines; bound this way it breaks only at the
+    dash between the two dates.
+    """
+    return re.sub(r"\b(" + "|".join(WEEKDAYS) + r") ", "\\1\u00a0", text)
+
+
+def render_year_tables(events: list[SchoolEvent], today: date) -> str:
+    """Render the current and next school year as HTML tables.
+
+    Most visitors want to look a date up, not subscribe to anything. Building
+    the table from the same events as the feed keeps the page from ever showing
+    a date the feed does not contain.
+    """
+    current = school_year(today)
+    blocks: list[str] = []
+
+    for year in (current, current + 1):
+        rows = [e for e in events if school_year(e.start) == year]
+        if not rows:
+            continue
+
+        cells = []
+        for event in sorted(rows, key=lambda e: e.start):
+            period, duration = format_period(event)
+            title = html.escape(event.summary)
+            if event.note:
+                title += f' <span class="hint">{html.escape(event.note)}</span>'
+            cells.append(
+                f"        <tr><td>{title}</td>"
+                f"<td>{keep_dates_together(html.escape(period))}</td>"
+                f"<td>{html.escape(duration)}</td></tr>"
+            )
+
+        blocks.append(
+            f"  <h3>Schuljahr {year}/{str(year + 1)[-2:]}</h3>\n"
+            '  <div class="table-wrap">\n'
+            '    <table class="year">\n'
+            "      <thead><tr><th>Termin</th><th>Zeitraum</th><th>Dauer</th></tr></thead>\n"
+            "      <tbody>\n" + "\n".join(cells) + "\n      </tbody>\n"
+            "    </table>\n"
+            "  </div>"
+        )
+
+    if not blocks:
+        # Unreachable while the staleness gate passes, but a page that silently
+        # renders nothing here would be worse than one that says so.
+        return "  <p>Für das laufende Schuljahr liegen derzeit keine Termine vor.</p>"
+    return "\n".join(blocks)
+
+
 def render_page(events: list[SchoolEvent], built: date, template: Path) -> str:
     """Fill the landing page template with what this run actually produced.
 
@@ -379,14 +503,11 @@ def render_page(events: list[SchoolEvent], built: date, template: Path) -> str:
     or unknown placeholder is a hard error: a page rendering a literal
     ``{{EVENT_COUNT}}`` to subscribers is worse than a failed build.
     """
-    # ``events`` holds exclusive iCal end dates; the last day a subscriber
-    # actually sees is the day before.
-    last_day = max(e.end for e in events) - timedelta(days=1)
-
     values = {
         "EVENT_COUNT": str(len(events)),
-        "RANGE_END": last_day.strftime("%d.%m.%Y"),
+        "RANGE_END": max(e.last_day for e in events).strftime("%d.%m.%Y"),
         "UPDATED": built.strftime("%d.%m.%Y"),
+        "YEAR_TABLES": render_year_tables(events, built),
     }
 
     html = template.read_text(encoding="utf-8")
