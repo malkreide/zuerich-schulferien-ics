@@ -6,12 +6,11 @@ topics: [icalendar, ics, swiss-open-data, open-data, zurich, github-actions, pyt
 project_type: other
 visibility: public
 license: MIT
-author_legal_name: "{AUTHOR_LEGAL_NAME}"   # offen — vor LICENSE-Commit ersetzen
+author_legal_name: "Hayal Özkan"
 github_user: malkreide
 default_branch: main
 language: python
-version: 1.0.0
+version: 1.1.0
 confirmed: true
 offen:
-  - author_legal_name in LICENSE und READMEs einsetzen
   - Topics nach Repo-Anlage setzen (gh repo edit --add-topic)

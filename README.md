@@ -1,6 +1,6 @@
 # Zürich Schulferien ICS Feed
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 
@@ -146,4 +146,4 @@ MIT License — see [LICENSE](LICENSE)
 
 ## Author
 
-Hayal Oezkan · [malkreide](https://github.com/malkreide)
+Hayal Özkan · [malkreide](https://github.com/malkreide)
