@@ -38,7 +38,7 @@ https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics
 
 | Platform | How to subscribe |
 |---|---|
-| Apple Calendar (iOS/macOS), Outlook | Open `webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` |
+| Apple Calendar (iOS/macOS) | Open `webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` |
 | Google Calendar / Android | Open `https://calendar.google.com/calendar/r?cid=https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` and confirm |
 | Other clients (Nextcloud, Thunderbird, …) | Add the raw HTTPS URL as a calendar subscription |
 
