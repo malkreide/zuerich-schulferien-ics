@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Author name filled in across `LICENSE`, both READMEs and `.github/repo-meta.yml`,
   replacing the `{AUTHOR_LEGAL_NAME}` placeholder.
 
-## [1.0.0] - 2026-08-20
+## [1.0.0] - 2026-08-22
 
 ### Added
 - Initial release: nightly CKAN fetch, RFC 5545-compliant ICS generation with
