@@ -148,4 +148,4 @@ MIT-Lizenz — siehe [LICENSE](LICENSE)
 
 ## Autor
 
-{AUTHOR_LEGAL_NAME} · [malkreide](https://github.com/malkreide)
+Hayal Oezkan · [malkreide](https://github.com/malkreide)
