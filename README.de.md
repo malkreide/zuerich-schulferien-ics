@@ -37,6 +37,18 @@ Stabile Feed-URL:
 https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics
 ```
 
+Es gibt denselben Datenbestand in drei Zuschnitten — einer genügt:
+
+| Feed | Inhalt |
+|---|---|
+| `ferien.ics` | Ferien und einzelne schulfreie Tage. **Die Standardauswahl.** |
+| `nur-ferien.ics` | Nur die mehrtägigen Schliessungen, ohne einzelne Tage |
+| `alles.ics` | Zusätzlich die allgemeinen Feiertage |
+
+`ferien.ics` bleibt bewusst unverändert: Unter dieser Adresse laufen bereits
+Abos, und sie nachträglich zu verengen würde Termine aus fremden Kalendern
+entfernen, ohne dass jemand gefragt wurde.
+
 | Plattform | Abo-Weg |
 |---|---|
 | Apple Kalender (iOS/macOS) | `webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` öffnen |
@@ -98,6 +110,9 @@ diesem Verhalten nicht betroffen.
 - `TRANSP:TRANSPARENT` — Ferien blockieren nie die Frei/Gebucht-Anzeige
 - Sanity-Gate: unplausible oder unvollständige API-Antworten lassen die
   Pipeline fehlschlagen, statt den letzten guten Feed zu überschreiben
+- **Vorwarnung statt stillem Auslaufen**: Reicht die Quelle weniger als 180 Tage
+  in die Zukunft oder fehlt das laufende Schuljahr, schlägt der Build fehl —
+  rund ein halbes Jahr, bevor der Feed inhaltlich leer liefe
 - Testsuite auf Fixtures (`pytest`), läuft ohne Netz in der CI
 - Keine Server, keine Secrets: GitHub Actions (OIDC) + GitHub Pages
 

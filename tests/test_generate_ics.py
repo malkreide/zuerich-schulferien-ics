@@ -15,9 +15,12 @@ from icalendar import Calendar
 
 import generate_ics
 from generate_ics import (
+    FEED_VARIANTS,
     HALF_DAY_TITLE,
     SchoolEvent,
     build_calendar,
+    check_feed,
+    check_source,
     clean_title,
     cutoff_date,
     format_period,
@@ -28,13 +31,15 @@ from generate_ics import (
     parse_stamp,
     render_page,
     render_year_tables,
-    sanity_check,
     school_year,
     select_events,
+    variant_events,
 )
 
 CUTOFF = date(2024, 1, 1)
 TODAY = date(2026, 8, 23)
+PRIMARY = FEED_VARIANTS[0]  # ferien.ics
+COUNTS = {v.filename: 10 for v in FEED_VARIANTS}
 
 
 def rec(summary: str, start: str, end: str) -> dict:
@@ -80,7 +85,7 @@ def test_exclusive_end_survives_into_the_ics_bytes():
     events = select_events(
         [rec("Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21")], CUTOFF
     )
-    ics = build_calendar(events).to_ical().decode("utf-8")
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert "DTSTART;VALUE=DATE:20260209" in ics
     assert "DTEND;VALUE=DATE:20260221" in ics
@@ -145,8 +150,8 @@ def test_public_holidays_are_not_school_records(summary):
     assert not is_school_record(summary)
 
 
-def test_public_holidays_are_filtered_out_of_the_feed():
-    """A December week in the source: one school entry, five holiday duplicates."""
+def test_public_holidays_are_kept_but_marked_as_such():
+    """`select_events` keeps everything; the variant decides what is published."""
     records = [
         rec("Schulen Stadt Zürich: Weihnachtsferien", "2025-12-20", "2026-01-05"),
         rec("Heilig Abend", "2025-12-24", "2025-12-25"),
@@ -158,7 +163,9 @@ def test_public_holidays_are_filtered_out_of_the_feed():
 
     events = select_events(records, CUTOFF)
 
-    assert [e.summary for e in events] == ["Weihnachtsferien"]
+    assert len(events) == 6
+    assert [e.summary for e in events if e.school] == ["Weihnachtsferien"]
+    assert [e.summary for e in variant_events(events, PRIMARY)] == ["Weihnachtsferien"]
 
 
 # --------------------------------------------------------------------------
@@ -220,7 +227,7 @@ def test_note_reaches_the_ics_as_a_description():
         ],
         CUTOFF,
     )
-    ics = build_calendar(events).to_ical().decode("utf-8")
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert "SUMMARY:Sommerferien" in ics
     assert "KW 29-33" in ics
@@ -266,7 +273,7 @@ def test_half_day_is_emitted_at_noon_local_time_not_as_all_day():
         ],
         CUTOFF,
     )
-    ics = build_calendar(events).to_ical().decode("utf-8")
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert "DTSTART;TZID=Europe/Zurich:20261218T120000" in ics
     assert "DTEND;TZID=Europe/Zurich:20261218T123000" in ics
@@ -300,7 +307,7 @@ def test_timed_event_ships_its_vtimezone():
         ],
         CUTOFF,
     )
-    cal = build_calendar(events)
+    cal = build_calendar(events, PRIMARY)
 
     assert [c.name for c in cal.walk("VTIMEZONE")] == ["VTIMEZONE"]
     assert cal.walk("VTIMEZONE")[0]["TZID"] == "Europe/Zurich"
@@ -311,7 +318,7 @@ def test_all_day_only_feed_ships_no_vtimezone():
         [rec("Schulen Stadt Zürich: Herbstferien", "2026-10-05", "2026-10-19")], CUTOFF
     )
 
-    assert build_calendar(events).walk("VTIMEZONE") == []
+    assert build_calendar(events, PRIMARY).walk("VTIMEZONE") == []
 
 
 def test_multi_day_record_is_never_collapsed_into_a_noon_event():
@@ -430,9 +437,9 @@ def test_calendar_round_trips_and_keeps_every_event():
         ),
         rec("Neujahrstag", "2026-01-01", "2026-01-02"),
     ]
-    events = select_events(records, CUTOFF)
+    events = variant_events(select_events(records, CUTOFF), PRIMARY)
 
-    reparsed = Calendar.from_ical(build_calendar(events).to_ical())
+    reparsed = Calendar.from_ical(build_calendar(events, PRIMARY).to_ical())
 
     assert len(reparsed.walk("VEVENT")) == len(events) == 2
 
@@ -441,22 +448,17 @@ def test_holidays_never_block_free_busy():
     events = select_events(
         [rec("Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21")], CUTOFF
     )
-    ics = build_calendar(events).to_ical().decode("utf-8")
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert "TRANSP:TRANSPARENT" in ics
 
 
 def test_calendar_advertises_a_refresh_interval():
-    ics = (
-        build_calendar(
-            select_events(
-                [rec("Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21")],
-                CUTOFF,
-            )
-        )
-        .to_ical()
-        .decode("utf-8")
+    events = select_events(
+        [rec("Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21")], CUTOFF
     )
+
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert "REFRESH-INTERVAL;VALUE=DURATION:PT24H" in ics
     assert "X-WR-CALNAME:Schulferien Stadt Zürich" in ics
@@ -486,23 +488,20 @@ def plausible_records(n: int = 60) -> list[dict]:
     return out
 
 
-def test_sanity_gate_accepts_a_plausible_feed():
+def test_source_gate_accepts_plausible_data():
     records = plausible_records()
-    events = select_events(records, CUTOFF)
-    cal = build_calendar(events)
 
-    sanity_check(records, events, cal.to_ical(), TODAY)  # must not raise
+    check_source(records, select_events(records, CUTOFF), TODAY)  # must not raise
 
 
-def test_sanity_gate_rejects_a_truncated_fetch():
+def test_source_gate_rejects_a_truncated_fetch():
     records = plausible_records(10)
-    events = select_events(records, CUTOFF)
 
     with pytest.raises(RuntimeError, match="refusing to publish a possibly truncated"):
-        sanity_check(records, events, build_calendar(events).to_ical(), TODAY)
+        check_source(records, select_events(records, CUTOFF), TODAY)
 
 
-def test_sanity_gate_rejects_a_renamed_school_prefix():
+def test_source_gate_rejects_a_renamed_school_prefix():
     """If the city drops the prefix, fail loudly instead of shipping nothing."""
     records = [
         rec("Volksschule Zürich: Ferien", f"2026-01-{d:02d}", f"2026-01-{d + 1:02d}")
@@ -510,34 +509,32 @@ def test_sanity_gate_rejects_a_renamed_school_prefix():
     ] + [rec("Neujahrstag", "2026-01-01", "2026-01-02")] * 12
 
     with pytest.raises(RuntimeError, match="renamed the school prefix"):
-        sanity_check(records, [], b"", TODAY)
+        check_source(records, [], TODAY)
 
 
-def test_sanity_gate_rejects_stale_source_data():
+def test_source_gate_rejects_stale_source_data():
     records = [
         rec("Schulen Stadt Zürich: Ferien", f"2018-01-{d:02d}", f"2018-01-{d + 1:02d}")
         for d in range(1, 29)
     ] * 2
 
     with pytest.raises(RuntimeError, match="entirely in the past"):
-        sanity_check(records, [], b"", TODAY)
+        check_source(records, [], TODAY)
 
 
-def test_sanity_gate_rejects_a_near_empty_feed():
-    records = plausible_records()
-    events = select_events(records, CUTOFF)[:3]
+def test_feed_gate_rejects_a_near_empty_feed():
+    events = variant_events(select_events(plausible_records(), CUTOFF), PRIMARY)[:3]
 
     with pytest.raises(RuntimeError, match="refusing to publish a near-empty feed"):
-        sanity_check(records, events, build_calendar(events).to_ical(), TODAY)
+        check_feed(PRIMARY, events, build_calendar(events, PRIMARY).to_ical())
 
 
-def test_sanity_gate_catches_a_round_trip_mismatch():
-    records = plausible_records()
-    events = select_events(records, CUTOFF)
-    truncated = build_calendar(events[:-1]).to_ical()
+def test_feed_gate_catches_a_round_trip_mismatch():
+    events = variant_events(select_events(plausible_records(), CUTOFF), PRIMARY)
+    truncated = build_calendar(events[:-1], PRIMARY).to_ical()
 
-    with pytest.raises(RuntimeError, match="Round-trip mismatch"):
-        sanity_check(records, events, truncated, TODAY)
+    with pytest.raises(RuntimeError, match="round-trip mismatch"):
+        check_feed(PRIMARY, events, truncated)
 
 
 # --------------------------------------------------------------------------
@@ -559,7 +556,7 @@ def test_page_reports_the_numbers_of_the_run_that_built_it(tmp_path):
         CUTOFF,
     )
 
-    html = render_page(events, date(2026, 8, 23), template)
+    html = render_page(events, COUNTS, date(2026, 8, 23), template)
 
     # Coverage end is the last day off, not the exclusive iCal end.
     assert html == "<p>2 Termine bis 18.10.2026, Stand 23.08.2026</p>"
@@ -574,7 +571,7 @@ def test_unresolved_placeholder_fails_the_build(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="UNBEKANNT"):
-        render_page(events, date(2026, 8, 23), template)
+        render_page(events, COUNTS, date(2026, 8, 23), template)
 
 
 def test_real_landing_page_template_renders():
@@ -583,7 +580,7 @@ def test_real_landing_page_template_renders():
         [rec("Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21")], CUTOFF
     )
 
-    html = render_page(events, date(2026, 8, 23), generate_ics.PAGE_TEMPLATE)
+    html = render_page(events, COUNTS, date(2026, 8, 23), generate_ics.PAGE_TEMPLATE)
 
     assert "20.02.2026" in html
     assert "{{" not in html
@@ -666,15 +663,14 @@ def test_a_different_closing_time_is_not_treated_as_noon():
     assert events[0].half_day is False
 
 
-def test_sanity_gate_takes_the_run_date_rather_than_reading_the_clock():
+def test_source_gate_takes_the_run_date_rather_than_reading_the_clock():
     """`today` is passed in so the staleness gate is testable without patching."""
     records = plausible_records()
     events = select_events(records, CUTOFF)
-    ics = build_calendar(events).to_ical()
 
-    sanity_check(records, events, ics, date(2026, 8, 23))
+    check_source(records, events, date(2026, 8, 23))
     with pytest.raises(RuntimeError, match="entirely in the past"):
-        sanity_check(records, events, ics, date(2099, 1, 1))
+        check_source(records, events, date(2099, 1, 1))
 
 
 # --------------------------------------------------------------------------
@@ -701,7 +697,7 @@ def test_dtstamp_comes_from_the_source_record_not_the_clock():
         ],
         CUTOFF,
     )
-    ics = build_calendar(events).to_ical().decode("utf-8")
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert "DTSTAMP:20231113T000000Z" in ics
 
@@ -727,8 +723,8 @@ def test_two_runs_produce_byte_identical_output():
         ),
     ]
 
-    first = build_calendar(select_events(records, CUTOFF)).to_ical()
-    second = build_calendar(select_events(records, CUTOFF)).to_ical()
+    first = build_calendar(select_events(records, CUTOFF), PRIMARY).to_ical()
+    second = build_calendar(select_events(records, CUTOFF), PRIMARY).to_ical()
 
     assert first == second
     assert b"DTSTAMP:20231113T000000Z" in first
@@ -747,7 +743,7 @@ def test_generated_bytes_carry_no_trace_of_today():
         ],
         CUTOFF,
     )
-    ics = build_calendar(events).to_ical().decode("utf-8")
+    ics = build_calendar(events, PRIMARY).to_ical().decode("utf-8")
 
     assert date.today().strftime("%Y%m%d") not in ics
 
@@ -938,7 +934,10 @@ def test_real_template_renders_the_overview():
     ]
 
     page = render_page(
-        select_events(records, CUTOFF), date(2026, 8, 23), generate_ics.PAGE_TEMPLATE
+        variant_events(select_events(records, CUTOFF), PRIMARY),
+        COUNTS,
+        date(2026, 8, 23),
+        generate_ics.PAGE_TEMPLATE,
     )
 
     assert "Schuljahr 2026/27" in page
@@ -963,3 +962,201 @@ def test_overview_binds_dates_with_a_non_breaking_space():
 
     assert "Mo\u00a021.12.2026 – Fr\u00a01.1.2027" in html_out
     assert "Mo 21.12.2026" not in html_out
+
+
+# --------------------------------------------------------------------------
+# Feed variants
+# --------------------------------------------------------------------------
+
+SAMPLE = [
+    ("Schulen Stadt Zürich: Herbstferien", "2026-10-05", "2026-10-17"),
+    ("Schulen Stadt Zürich schulfrei: Pfingsten", "2027-05-16", "2027-05-18"),
+    ("Schulen Stadt Zürich schulfrei: Knabenschiessen", "2026-09-14", "2026-09-15"),
+    ("Schulen Stadt Zürich: 1. Schultag", "2026-08-17", "2026-08-18"),
+    (
+        "Schulen Stadt Zürich schulfrei: Schulschluss um 12 Uhr",
+        "2026-12-18",
+        "2026-12-19",
+    ),
+    ("Neujahrstag", "2027-01-01", "2027-01-02"),
+    ("Ostersonntag", "2027-03-28", "2027-03-29"),
+]
+
+
+def sample_events():
+    return select_events([rec(*args) for args in SAMPLE], CUTOFF)
+
+
+def by_name(filename: str):
+    return next(v for v in FEED_VARIANTS if v.filename == filename)
+
+
+def titles(filename: str) -> set[str]:
+    return {e.summary for e in variant_events(sample_events(), by_name(filename))}
+
+
+def test_three_feeds_are_published():
+    assert [v.filename for v in FEED_VARIANTS] == [
+        "ferien.ics",
+        "nur-ferien.ics",
+        "alles.ics",
+    ]
+
+
+def test_default_feed_is_unchanged_school_entries_only():
+    """`ferien.ics` is the advertised, already-subscribed URL. Do not narrow it."""
+    assert titles("ferien.ics") == {
+        "Herbstferien",
+        "Pfingsten",
+        "Knabenschiessen",
+        "1. Schultag",
+        HALF_DAY_TITLE,
+    }
+
+
+def test_narrow_feed_keeps_only_multi_day_closures():
+    """What a parent has to arrange childcare for."""
+    assert titles("nur-ferien.ics") == {"Herbstferien", "Pfingsten"}
+
+
+def test_narrow_feed_excludes_the_half_day():
+    """A short school day is not a closure — it must not look like one here."""
+    assert HALF_DAY_TITLE not in titles("nur-ferien.ics")
+
+
+def test_wide_feed_adds_the_public_holidays():
+    assert {"Neujahrstag", "Ostersonntag"} <= titles("alles.ics")
+
+
+def test_feeds_nest_from_narrow_to_wide():
+    """nur-ferien ⊂ ferien ⊂ alles — so no feed invents an event."""
+    events = sample_events()
+    sets = [
+        {e.uid for e in variant_events(events, by_name(n))}
+        for n in ("nur-ferien.ics", "ferien.ics", "alles.ics")
+    ]
+
+    assert sets[0] < sets[1] < sets[2]
+
+
+def test_an_event_keeps_one_uid_across_every_feed():
+    """Subscribing to two variants must not produce two unrelated events.
+
+    Read back from the generated bytes, not the dataclass: the UID that matters
+    is the one a calendar app actually sees.
+    """
+    events = sample_events()
+    published: dict[str, dict[str, str]] = {}
+    for variant in FEED_VARIANTS:
+        ics = build_calendar(variant_events(events, variant), variant).to_ical()
+        published[variant.filename] = {
+            str(c["SUMMARY"]): str(c["UID"])
+            for c in Calendar.from_ical(ics).walk("VEVENT")
+        }
+
+    narrow = published["nur-ferien.ics"]
+    assert narrow  # guard: an empty dict would make the loop below vacuous
+    for summary, uid in narrow.items():
+        assert published["ferien.ics"][summary] == uid
+        assert published["alles.ics"][summary] == uid
+
+
+def test_each_feed_introduces_itself_distinctly():
+    """Three subscriptions in one app must be tellable apart."""
+    names = set()
+    for variant in FEED_VARIANTS:
+        ics = build_calendar(sample_events(), variant).to_ical().decode("utf-8")
+        assert f"X-WR-CALNAME:{variant.calname}" in ics
+        names.add(variant.calname)
+
+    assert len(names) == len(FEED_VARIANTS)
+
+
+def test_landing_page_offers_every_variant():
+    counts = {v.filename: 42 for v in FEED_VARIANTS}
+
+    page = render_page(
+        variant_events(sample_events(), PRIMARY),
+        counts,
+        date(2026, 8, 23),
+        generate_ics.PAGE_TEMPLATE,
+    )
+
+    for variant in FEED_VARIANTS:
+        assert f"/{variant.filename}" in page
+    assert "{{" not in page
+
+
+# --------------------------------------------------------------------------
+# Sharpened source gate (forward coverage + running school year)
+# --------------------------------------------------------------------------
+
+
+def year_of_records(start_year: int, years: int = 6) -> list[dict]:
+    """A plausible school calendar: 12 school entries per year, plus holidays."""
+    out = []
+    for offset in range(years):
+        year = start_year + offset
+        for month, day in (
+            (8, 17),
+            (9, 14),
+            (10, 5),
+            (12, 18),
+            (12, 21),
+            (2, 15),
+            (3, 25),
+            (4, 19),
+            (4, 26),
+            (5, 16),
+            (7, 19),
+            (6, 1),
+        ):
+            y = year if month >= 8 else year + 1
+            begin = date(y, month, day)
+            out.append(
+                rec(
+                    "Schulen Stadt Zürich: Ferien",
+                    begin.isoformat(),
+                    (begin + timedelta(days=5)).isoformat(),
+                )
+            )
+        out.append(rec("Neujahrstag", f"{year + 1}-01-01", f"{year + 1}-01-02"))
+    return out
+
+
+def test_source_gate_rejects_a_source_that_is_about_to_run_out():
+    """The old gate only fired once the data was entirely historic."""
+    records = year_of_records(2020, years=6)  # last event mid-2026
+    today = date(2026, 4, 1)
+
+    with pytest.raises(RuntimeError, match="has probably not"):
+        check_source(records, select_events(records, cutoff_date(today)), today)
+
+
+def test_source_gate_accepts_a_source_with_room_ahead():
+    records = year_of_records(2024, years=6)
+    today = date(2026, 8, 23)
+
+    check_source(records, select_events(records, cutoff_date(today)), today)
+
+
+def test_source_gate_rejects_a_missing_running_school_year():
+    """Far-future entries must not paper over a deleted current year."""
+    records = [
+        r
+        for r in year_of_records(2024, years=6)
+        if not r["start_date"].startswith(("2026-08", "2026-09", "2026-1", "2027-0"))
+    ]
+    today = date(2026, 8, 23)
+
+    with pytest.raises(RuntimeError, match="running year looks"):
+        check_source(records, select_events(records, cutoff_date(today)), today)
+
+
+def test_forward_coverage_is_checked_before_the_running_year():
+    """A source that ran out should say so, not blame the current year."""
+    records = year_of_records(2020, years=6)
+    today = date(2026, 6, 1)
+
+    with pytest.raises(RuntimeError, match="has probably not"):
+        check_source(records, select_events(records, cutoff_date(today)), today)

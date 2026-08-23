@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Two further feeds alongside the existing one, all built from the same fetch:
+  `nur-ferien.ics` (only the multi-day closures — no single days like
+  Knabenschiessen or the first day of school) and `alles.ics` (additionally the
+  public holidays from the same dataset). `ferien.ics` is deliberately
+  **unchanged**: it is the advertised, already-subscribed URL, and narrowing it
+  would strip dates from calendars without anyone asking. The three nest
+  (`nur-ferien` ⊂ `ferien` ⊂ `alles`) and an event keeps one UID across all of
+  them. The landing page offers all three.
+- Forward-coverage gate: the build fails when the source reaches less than
+  `MIN_FORWARD_COVERAGE_DAYS` (180) ahead. `latest_end < today` alone only fired
+  once the data was *entirely* historic — by which point parents had been
+  planning against a feed that had quietly run out. Against the current data the
+  first failure would be 2030-02-19, about six months before the source ends.
+- Running-school-year gate: the school year containing today must carry at least
+  `MIN_EVENTS_CURRENT_YEAR` (5) events, catching a source that keeps far-future
+  entries but drops the current year.
 - Year overview on the landing page: the current and next school year as
   tables, rendered from the same events as the feed. Most visitors want to look
   a date up rather than subscribe, and that was not served at all. Building it
@@ -15,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not contain.
 
 ### Changed
+- `sanity_check` split into `check_source` (gates the fetched data once) and
+  `check_feed` (gates each generated file, including a duplicate-UID check).
 - `DTSTAMP` comes from the source record's `created_date` instead of the wall
   clock. Every nightly run previously emitted a byte-different file even when
   nothing had changed, rotating the ETag so every subscriber re-downloaded the

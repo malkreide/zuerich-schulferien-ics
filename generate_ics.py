@@ -12,10 +12,12 @@ Design decisions
   applied. Do not "fix" this. ``tests/test_generate_ics.py`` guards it.
 - The source mixes school entries (prefixed ``Schulen Stadt Zürich``) with
   plain public holidays (Neujahrstag, Ostersonntag, Nationalfeiertag, …).
-  Only school entries are published: 94 of 97 holiday records in a typical
-  window fall *inside* a school-free block anyway, and 22 land on weekends,
-  so publishing them buries the school dates the feed exists for. Subscribers
-  who want public holidays already have a calendar for them.
+  94 of 97 holiday records in a typical window fall *inside* a school-free
+  block anyway, and 22 land on weekends, so the default feed leaves them out.
+- Three feeds are published from one fetch (see ``FEED_VARIANTS``).
+  ``ferien.ics`` is the advertised URL and its contents are *frozen*: people
+  are already subscribed to it, so narrowing it would silently strip dates
+  from their calendars. The narrower and wider cuts get their own filenames.
 - Titles are display strings, not database strings. The redundant
   ``Schulen Stadt Zürich schulfrei:`` prefix is dropped (the calendar is
   already named) and a trailing parenthetical is moved into DESCRIPTION, so
@@ -54,6 +56,7 @@ import hashlib
 import html
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -66,10 +69,14 @@ CKAN_BASE = "https://data.stadt-zuerich.ch/api/3/action/datastore_search"
 RESOURCE_ID = "aad477f6-db39-4d1b-92d8-0885f2d363d1"
 PAGE_SIZE = 1000
 OUTPUT_DIR = Path("public")
-OUTPUT_FILE = OUTPUT_DIR / "ferien.ics"
+FEED_CAPTION = (
+    "Ferien und schulfreie Tage der Volksschule der Stadt Zürich. "
+    "Quelle: Open Data Zürich (Datensatz ssd_schulferien)."
+)
 PAGE_TEMPLATE = Path("web/index.html")
 PAGE_FILE = OUTPUT_DIR / "index.html"
 UID_DOMAIN = "zuerich-schulferien-ics.malkreide.github.io"
+FEED_BASE_URL = "https://malkreide.github.io/zuerich-schulferien-ics"
 
 # Publish events from the start of this many calendar years ago. 2 => on any
 # day in 2026 the feed starts at 2024-01-01.
@@ -106,10 +113,17 @@ SCHOOL_YEAR_START_MONTH = 8
 
 # Sanity gate thresholds
 MIN_EXPECTED_EVENTS = 30
-MIN_EXPECTED_PUBLISHED = 20
 # Share of fetched records that must look like school records. Guards against
 # the city renaming the prefix, which would silently empty the feed.
 MIN_SCHOOL_SHARE = 0.3
+# The source must reach this far ahead. `latest_end < today` alone only fires
+# once the data is *entirely* historic, by which point parents have been
+# planning against a feed that quietly ran out. Half a year gives the
+# maintainer time to notice the city has not published the next school year.
+MIN_FORWARD_COVERAGE_DAYS = 180
+# The school year containing today must carry at least this many events, so a
+# source that keeps far-future entries but drops the current year is caught.
+MIN_EVENTS_CURRENT_YEAR = 5
 REQUEST_TIMEOUT = 30
 
 
@@ -124,6 +138,7 @@ class SchoolEvent:
     stamp: datetime  # DTSTAMP, from the source record — never the wall clock
     note: str | None = None
     half_day: bool = False
+    school: bool = True  # False for a plain public holiday from the same source
 
     @property
     def last_day(self) -> date:
@@ -131,9 +146,77 @@ class SchoolEvent:
         return self.end - timedelta(days=1)
 
     @property
+    def days(self) -> int:
+        return (self.end - self.start).days
+
+    @property
+    def closure(self) -> bool:
+        """A multi-day school closure — the kind that needs childcare arranged.
+
+        ``days >= 2`` already excludes a half day: ``half_day`` is only set for
+        a record spanning exactly one day, so no extra guard is needed here.
+        """
+        return self.school and self.days >= 2
+
+    @property
     def description(self) -> str | None:
         parts = [p for p in (HALF_DAY_NOTE if self.half_day else None, self.note) if p]
         return " ".join(parts) or None
+
+
+@dataclass(frozen=True)
+class FeedVariant:
+    """One published .ics file: which events go in, and how it introduces itself."""
+
+    filename: str
+    calname: str
+    caption: str
+    include: Callable[[SchoolEvent], bool]
+    min_events: int
+    blurb: str  # one line for the landing page
+
+
+FEED_VARIANTS = (
+    FeedVariant(
+        # Frozen: this URL is already subscribed to. Narrowing it would strip
+        # dates from calendars without anyone asking.
+        filename="ferien.ics",
+        calname="Schulferien Stadt Zürich",
+        caption=FEED_CAPTION,
+        include=lambda e: e.school,
+        min_events=20,
+        blurb="Ferien und einzelne schulfreie Tage. Die Standardauswahl.",
+    ),
+    FeedVariant(
+        filename="nur-ferien.ics",
+        calname="Schulferien Stadt Zürich (nur Ferien)",
+        caption=(
+            "Nur die mehrtägigen Schulschliessungen der Volksschule der Stadt "
+            "Zürich. Quelle: Open Data Zürich (Datensatz ssd_schulferien)."
+        ),
+        include=lambda e: e.closure,
+        min_events=8,
+        blurb=(
+            "Nur die mehrtägigen Schliessungen — ohne einzelne Tage wie "
+            "Knabenschiessen oder den 1. Schultag."
+        ),
+    ),
+    FeedVariant(
+        filename="alles.ics",
+        calname="Schulferien Stadt Zürich (mit Feiertagen)",
+        caption=(
+            "Ferien und schulfreie Tage der Volksschule der Stadt Zürich, "
+            "zusätzlich die allgemeinen Feiertage aus demselben Datensatz. "
+            "Quelle: Open Data Zürich (Datensatz ssd_schulferien)."
+        ),
+        include=lambda e: True,
+        min_events=25,
+        blurb=(
+            "Zusätzlich die allgemeinen Feiertage. Nur sinnvoll, wenn im "
+            "Kalender noch kein Feiertagsabo liegt."
+        ),
+    ),
+)
 
 
 def fetch_all_records() -> list[dict]:
@@ -239,9 +322,10 @@ def clean_title(raw: str) -> tuple[str, str | None]:
 
 
 def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
-    """Parse, filter and normalise records into sorted ``SchoolEvent``s.
+    """Parse and normalise every record into sorted ``SchoolEvent``s.
 
-    Public holidays are dropped (see module docstring). ``end`` is the
+    Public holidays are kept here and marked ``school=False``; which feed they
+    reach is a per-variant decision (see ``FEED_VARIANTS``). ``end`` is the
     exclusive iCal end date. A record is dropped only when it has *finished*
     before ``cutoff``; one straddling the cutoff (e.g. Weihnachtsferien
     2024/25) is kept in full so the holiday is not truncated.
@@ -250,9 +334,6 @@ def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
 
     for rec in records:
         raw_summary = rec["summary"].strip()
-        if not is_school_record(raw_summary):
-            continue
-
         start = parse_date(rec["start_date"])
         end = parse_date(rec["end_date"])  # already exclusive in the source
 
@@ -297,31 +378,31 @@ def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
                 stamp=parse_stamp(rec, start),
                 note=note,
                 half_day=half_day,
+                school=is_school_record(raw_summary),
             )
         )
 
     return sorted(events, key=lambda e: (e.start, e.summary))
 
 
-def build_calendar(events: list[SchoolEvent]) -> Calendar:
+def variant_events(
+    events: list[SchoolEvent], variant: FeedVariant
+) -> list[SchoolEvent]:
+    """The subset of ``events`` that this feed publishes."""
+    return [e for e in events if variant.include(e)]
+
+
+def build_calendar(events: list[SchoolEvent], variant: FeedVariant) -> Calendar:
     cal = Calendar()
     cal.add("prodid", "-//zuerich-schulferien-ics//Schulferien Generator//DE")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("method", "PUBLISH")
     # RFC 7986 + de-facto extensions for client display and refresh behaviour
-    cal.add("name", "Schulferien Stadt Zürich")
-    cal.add("x-wr-calname", "Schulferien Stadt Zürich")
-    cal.add(
-        "description",
-        "Ferien und schulfreie Tage der Volksschule der Stadt Zürich. "
-        "Quelle: Open Data Zürich (Datensatz ssd_schulferien).",
-    )
-    cal.add(
-        "x-wr-caldesc",
-        "Ferien und schulfreie Tage der Volksschule der Stadt Zürich. "
-        "Quelle: Open Data Zürich (Datensatz ssd_schulferien).",
-    )
+    cal.add("name", variant.calname)
+    cal.add("x-wr-calname", variant.calname)
+    cal.add("description", variant.caption)
+    cal.add("x-wr-caldesc", variant.caption)
     cal.add("refresh-interval;value=duration", "PT24H")
     cal.add("x-published-ttl", "PT24H")
     cal.add("color", "blue")
@@ -361,13 +442,12 @@ def build_calendar(events: list[SchoolEvent]) -> Calendar:
     return cal
 
 
-def sanity_check(
-    records: list[dict],
-    events: list[SchoolEvent],
-    ics_bytes: bytes,
-    today: date,
-) -> None:
-    """Fail hard before deployment if the feed looks broken."""
+def check_source(records: list[dict], events: list[SchoolEvent], today: date) -> None:
+    """Gate the fetched data before any file is written.
+
+    Everything here fails the whole run: if the source is wrong, publishing a
+    partly-wrong feed is worse than leaving the last known-good one in place.
+    """
     if len(records) < MIN_EXPECTED_EVENTS:
         raise RuntimeError(
             f"Only {len(records)} events fetched (expected >= {MIN_EXPECTED_EVENTS}); "
@@ -392,12 +472,37 @@ def sanity_check(
             "source data looks stale or wrong."
         )
 
-    # The cutoff must never swallow the whole feed — that would mean the
-    # source stopped publishing current school years.
-    if len(events) < MIN_EXPECTED_PUBLISHED:
+    # Forward coverage: a feed that has quietly run out is useless to someone
+    # planning next term, and nothing else here would notice.
+    horizon = (latest_end - today).days
+    if horizon < MIN_FORWARD_COVERAGE_DAYS:
         raise RuntimeError(
-            f"Only {len(events)} events survive the cutoff (expected >= "
-            f"{MIN_EXPECTED_PUBLISHED}); refusing to publish a near-empty feed."
+            f"Source covers only {horizon} more days (until {latest_end}, "
+            f"minimum {MIN_FORWARD_COVERAGE_DAYS}); the city has probably not "
+            "published the next school year yet."
+        )
+
+    # A source that keeps far-future entries but drops the running school year
+    # would sail past the horizon check above.
+    current = school_year(today)
+    in_current = sum(1 for e in events if e.school and school_year(e.start) == current)
+    if in_current < MIN_EVENTS_CURRENT_YEAR:
+        raise RuntimeError(
+            f"School year {current}/{current + 1} has only {in_current} events "
+            f"(expected >= {MIN_EVENTS_CURRENT_YEAR}); the running year looks "
+            "incomplete."
+        )
+
+
+def check_feed(
+    variant: FeedVariant, events: list[SchoolEvent], ics_bytes: bytes
+) -> None:
+    """Gate one generated feed before it is written."""
+    if len(events) < variant.min_events:
+        raise RuntimeError(
+            f"{variant.filename}: only {len(events)} events survive the filter "
+            f"(expected >= {variant.min_events}); refusing to publish a "
+            "near-empty feed."
         )
 
     # Round-trip: the generated bytes must parse back cleanly.
@@ -405,8 +510,13 @@ def sanity_check(
     n_events = sum(1 for c in reparsed.walk("VEVENT"))
     if n_events != len(events):
         raise RuntimeError(
-            f"Round-trip mismatch: {n_events} events in ICS vs {len(events)} selected."
+            f"{variant.filename}: round-trip mismatch, {n_events} events in ICS "
+            f"vs {len(events)} selected."
         )
+
+    uids = [str(c["UID"]) for c in reparsed.walk("VEVENT")]
+    if len(set(uids)) != len(uids):
+        raise RuntimeError(f"{variant.filename}: duplicate UIDs in the generated feed.")
 
 
 def cutoff_date(today: date) -> date:
@@ -494,7 +604,32 @@ def render_year_tables(events: list[SchoolEvent], today: date) -> str:
     return "\n".join(blocks)
 
 
-def render_page(events: list[SchoolEvent], built: date, template: Path) -> str:
+def render_variant_rows(counts: dict[str, int]) -> str:
+    """The feed picker on the landing page, one row per variant."""
+    rows = []
+    for variant in FEED_VARIANTS:
+        url = f"{FEED_BASE_URL}/{variant.filename}"
+        rows.append(
+            '  <div class="variant">\n'
+            f"    <h3>{html.escape(variant.calname)}</h3>\n"
+            f"    <p>{html.escape(variant.blurb)} "
+            f'<span class="count">{counts[variant.filename]} Termine</span></p>\n'
+            '    <div class="feed-row">\n'
+            f'      <div class="feed-url">{html.escape(url)}</div>\n'
+            f'      <button class="copy" type="button" data-url="{html.escape(url)}">'
+            "Kopieren</button>\n"
+            "    </div>\n"
+            "  </div>"
+        )
+    return "\n".join(rows)
+
+
+def render_page(
+    events: list[SchoolEvent],
+    counts: dict[str, int],
+    built: date,
+    template: Path,
+) -> str:
     """Fill the landing page template with what this run actually produced.
 
     The page states an event count and a coverage end date. Those must come
@@ -508,6 +643,7 @@ def render_page(events: list[SchoolEvent], built: date, template: Path) -> str:
         "RANGE_END": max(e.last_day for e in events).strftime("%d.%m.%Y"),
         "UPDATED": built.strftime("%d.%m.%Y"),
         "YEAR_TABLES": render_year_tables(events, built),
+        "VARIANT_ROWS": render_variant_rows(counts),
     }
 
     html = template.read_text(encoding="utf-8")
@@ -527,24 +663,33 @@ def main() -> int:
     today = date.today()
     cutoff = cutoff_date(today)
     events = select_events(records, cutoff)
-    cal = build_calendar(events)
-    ics_bytes = cal.to_ical()
-    sanity_check(records, events, ics_bytes, today)
+    check_source(records, events, today)
 
-    # Rendered before the first write so a template error aborts the run while
-    # the previously deployed feed is still the last thing on Pages.
-    page_html = render_page(events, today, PAGE_TEMPLATE)
+    # Everything is generated and gated before the first write, so a failure
+    # anywhere leaves the previously deployed feeds untouched on Pages.
+    generated: dict[str, bytes] = {}
+    counts: dict[str, int] = {}
+    for variant in FEED_VARIANTS:
+        selected = variant_events(events, variant)
+        ics_bytes = build_calendar(selected, variant).to_ical()
+        check_feed(variant, selected, ics_bytes)
+        generated[variant.filename] = ics_bytes
+        counts[variant.filename] = len(selected)
+
+    primary = variant_events(events, FEED_VARIANTS[0])
+    page_html = render_page(primary, counts, today, PAGE_TEMPLATE)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_FILE.write_bytes(ics_bytes)
+    for filename, ics_bytes in generated.items():
+        (OUTPUT_DIR / filename).write_bytes(ics_bytes)
     PAGE_FILE.write_text(page_html, encoding="utf-8")
 
     latest = max(parse_date(r["end_date"]) for r in records)
+    summary = ", ".join(f"{name} {counts[name]}" for name in generated)
     print(
-        f"OK: {len(events)} of {len(records)} records written to {OUTPUT_FILE} "
-        f"({len(ics_bytes)} bytes; cutoff {cutoff}, "
-        f"{sum(1 for e in events if e.half_day)} half-day events, "
-        f"latest source event ends {latest})."
+        f"OK: {len(records)} records → {summary} "
+        f"(cutoff {cutoff}, latest source event ends {latest}, "
+        f"{(latest - today).days} days of coverage ahead)."
     )
     print(f"OK: landing page written to {PAGE_FILE} ({len(page_html)} chars).")
     return 0

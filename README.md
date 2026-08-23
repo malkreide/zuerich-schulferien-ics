@@ -36,6 +36,18 @@ Stable feed URL:
 https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics
 ```
 
+The same data is published in three cuts — subscribe to one of them:
+
+| Feed | Contents |
+|---|---|
+| `ferien.ics` | Holidays and individual school-free days. **The default.** |
+| `nur-ferien.ics` | Only the multi-day closures, no single days |
+| `alles.ics` | Additionally the public holidays |
+
+`ferien.ics` is deliberately left unchanged: people are already subscribed to
+that URL, and narrowing it after the fact would remove dates from their
+calendars without anyone asking.
+
 | Platform | How to subscribe |
 |---|---|
 | Apple Calendar (iOS/macOS) | Open `webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` |
@@ -96,6 +108,9 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 - `TRANSP:TRANSPARENT` — holidays never block your free/busy availability
 - Sanity gate: implausible or truncated API responses fail the pipeline
   instead of overwriting the last known-good feed
+- **Warns instead of running out quietly**: the build fails when the source
+  reaches less than 180 days ahead, or when the running school year is missing —
+  roughly half a year before the feed would go empty
 - Fixture-based `pytest` suite that runs offline in CI
 - Zero servers, zero secrets: GitHub Actions (OIDC) + GitHub Pages
 
