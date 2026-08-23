@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CKAN outage cannot turn it red. CI runs it — plus `ruff` — before the build
   job, so a failing test blocks deployment.
 - `requirements-dev.txt` for the test and lint toolchain.
+- CI runs on `pull_request` too. The workflow previously triggered only on
+  push to `main`, `schedule` and `workflow_dispatch`, so the test job could
+  never block a pull request — failures would only have surfaced after the
+  merge. `build` and `deploy` are skipped on pull requests: no Pages
+  deployment from a branch, and no dependency on the live CKAN API that could
+  turn a review red.
 - Sanity gate rejects a feed where fewer than 30% of fetched records match the
   school prefix, catching a rename at the source instead of shipping an empty
   calendar. `MIN_EXPECTED_PUBLISHED` raised from 10 to 20.
@@ -40,6 +46,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deployed feed: all 76 retained events keep their UID.
 - Landing page and both READMEs state what the feed deliberately does not cover
   — public holidays, school-specific dates, and childcare opening hours.
+- Half-day detection tolerates a reworded source (`um 12.00 Uhr`, `um 12:00
+  Uhr`, trailing qualifiers). The previous pattern was anchored end to end, so
+  a rewording would have silently reverted the entry to an all-day event — a
+  school day rendered as a day off, the exact failure this branch prevents.
+  Any extra wording is preserved in the description.
+- `sanity_check` takes the run date as an argument instead of reading the clock,
+  which makes the staleness gate testable without patching.
+
+### Fixed
+- UIDs for records shipping `end_date == start_date` are hashed from the
+  *normalised* end date, matching what the feed has always published. The
+  rewrite moved the hash ahead of that normalisation, which would have handed
+  each such record a new UID and resynced it for every subscriber. All six
+  affected rows in the source currently predate the cutoff, so no deployed UID
+  changed — the defect was latent until the city filed the next one inside the
+  window. Verified against the deployed feed: 76 of 76 retained events keep
+  their UID, 0 new.
 
 ## [1.1.0] - 2026-08-23
 

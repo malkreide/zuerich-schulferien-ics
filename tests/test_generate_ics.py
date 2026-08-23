@@ -29,6 +29,7 @@ from generate_ics import (
 )
 
 CUTOFF = date(2024, 1, 1)
+TODAY = date(2026, 8, 23)
 
 
 def rec(summary: str, start: str, end: str) -> dict:
@@ -485,7 +486,7 @@ def test_sanity_gate_accepts_a_plausible_feed():
     events = select_events(records, CUTOFF)
     cal = build_calendar(events)
 
-    sanity_check(records, events, cal.to_ical())  # must not raise
+    sanity_check(records, events, cal.to_ical(), TODAY)  # must not raise
 
 
 def test_sanity_gate_rejects_a_truncated_fetch():
@@ -493,7 +494,7 @@ def test_sanity_gate_rejects_a_truncated_fetch():
     events = select_events(records, CUTOFF)
 
     with pytest.raises(RuntimeError, match="refusing to publish a possibly truncated"):
-        sanity_check(records, events, build_calendar(events).to_ical())
+        sanity_check(records, events, build_calendar(events).to_ical(), TODAY)
 
 
 def test_sanity_gate_rejects_a_renamed_school_prefix():
@@ -504,7 +505,7 @@ def test_sanity_gate_rejects_a_renamed_school_prefix():
     ] + [rec("Neujahrstag", "2026-01-01", "2026-01-02")] * 12
 
     with pytest.raises(RuntimeError, match="renamed the school prefix"):
-        sanity_check(records, [], b"")
+        sanity_check(records, [], b"", TODAY)
 
 
 def test_sanity_gate_rejects_stale_source_data():
@@ -514,7 +515,7 @@ def test_sanity_gate_rejects_stale_source_data():
     ] * 2
 
     with pytest.raises(RuntimeError, match="entirely in the past"):
-        sanity_check(records, [], b"")
+        sanity_check(records, [], b"", TODAY)
 
 
 def test_sanity_gate_rejects_a_near_empty_feed():
@@ -522,7 +523,7 @@ def test_sanity_gate_rejects_a_near_empty_feed():
     events = select_events(records, CUTOFF)[:3]
 
     with pytest.raises(RuntimeError, match="refusing to publish a near-empty feed"):
-        sanity_check(records, events, build_calendar(events).to_ical())
+        sanity_check(records, events, build_calendar(events).to_ical(), TODAY)
 
 
 def test_sanity_gate_catches_a_round_trip_mismatch():
@@ -531,7 +532,7 @@ def test_sanity_gate_catches_a_round_trip_mismatch():
     truncated = build_calendar(events[:-1]).to_ical()
 
     with pytest.raises(RuntimeError, match="Round-trip mismatch"):
-        sanity_check(records, events, truncated)
+        sanity_check(records, events, truncated, TODAY)
 
 
 # --------------------------------------------------------------------------
@@ -581,3 +582,91 @@ def test_real_landing_page_template_renders():
 
     assert "20.02.2026" in html
     assert "{{" not in html
+
+
+# --------------------------------------------------------------------------
+# Regressions found in review
+# --------------------------------------------------------------------------
+
+
+def test_uid_of_an_equal_dates_record_matches_the_already_published_one():
+    """`end == start` rows must hash the *normalised* end, as the feed always did.
+
+    Hashing the raw end instead hands every such record a new UID, so a
+    subscriber sees the event removed and re-added. Six rows in the source ship
+    this way; they currently predate the cutoff, so the bug is latent until the
+    city files the next one inside the window.
+    """
+    raw = "Schulen Stadt Zürich: Schulschluss 12 Uhr"
+    events = select_events([rec(raw, "2026-12-18", "2026-12-18")], CUTOFF)
+
+    assert events[0].uid == make_uid(raw, date(2026, 12, 18), date(2026, 12, 19))
+
+
+def test_equal_dates_and_exclusive_end_records_agree_on_the_uid():
+    """The same day expressed both ways must not produce two different events."""
+    equal = select_events(
+        [rec("Schulen Stadt Zürich: 1. Schultag", "2026-08-17", "2026-08-17")], CUTOFF
+    )
+    exclusive = select_events(
+        [rec("Schulen Stadt Zürich: 1. Schultag", "2026-08-17", "2026-08-18")], CUTOFF
+    )
+
+    assert equal[0].uid == exclusive[0].uid
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Schulen Stadt Zürich schulfrei: Schulschluss um 12.00 Uhr",
+        "Schulen Stadt Zürich schulfrei: Schulschluss um 12:00 Uhr",
+        "Schulen Stadt Zürich schulfrei: Schulschluss um 12 Uhr für alle Stufen",
+    ],
+)
+def test_reworded_half_day_still_renders_at_noon(raw):
+    """A source rewording must not silently turn a school day into a day off."""
+    events = select_events([rec(raw, "2026-12-18", "2026-12-19")], CUTOFF)
+
+    assert events[0].half_day is True
+    assert events[0].summary == HALF_DAY_TITLE
+
+
+def test_reworded_half_day_keeps_the_source_wording():
+    events = select_events(
+        [
+            rec(
+                "Schulen Stadt Zürich schulfrei: Schulschluss um 12 Uhr für alle Stufen",
+                "2026-12-18",
+                "2026-12-19",
+            )
+        ],
+        CUTOFF,
+    )
+
+    assert "für alle Stufen" in events[0].description
+
+
+def test_a_different_closing_time_is_not_treated_as_noon():
+    events = select_events(
+        [
+            rec(
+                "Schulen Stadt Zürich schulfrei: Schulschluss um 15 Uhr",
+                "2026-12-18",
+                "2026-12-19",
+            )
+        ],
+        CUTOFF,
+    )
+
+    assert events[0].half_day is False
+
+
+def test_sanity_gate_takes_the_run_date_rather_than_reading_the_clock():
+    """`today` is passed in so the staleness gate is testable without patching."""
+    records = plausible_records()
+    events = select_events(records, CUTOFF)
+    ics = build_calendar(events).to_ical()
+
+    sanity_check(records, events, ics, date(2026, 8, 23))
+    with pytest.raises(RuntimeError, match="entirely in the past"):
+        sanity_check(records, events, ics, date(2099, 1, 1))

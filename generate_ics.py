@@ -76,8 +76,12 @@ TITLE_PREFIX_RE = re.compile(r"^Schulen Stadt Zürich(?:\s+schulfrei)?:\s*")
 # A trailing parenthetical, optionally preceded by the source's footnote
 # asterisk: "Frühlingsferien* (ausnahmsweise KW 16 & 17, …)".
 TRAILING_NOTE_RE = re.compile(r"\s*\*?\s*\(([^()]*)\)\s*$")
-# The source spells this both with and without "um".
-HALF_DAY_RE = re.compile(r"^Schulschluss\s+(?:um\s+)?12\s+Uhr$", re.IGNORECASE)
+# The source already spells this both with and without "um". Anchoring the
+# whole string would let a rewording ("um 12.00 Uhr", "… für alle Stufen")
+# silently fall back to an all-day event — a school day rendered as a day off,
+# which is exactly what this branch exists to prevent. So: match the opening
+# word plus a noon time, and keep any extra wording in the description.
+HALF_DAY_RE = re.compile(r"^Schulschluss\b.*\b12(?:[.:]00)?\s*Uhr\b", re.IGNORECASE)
 
 HALF_DAY_TITLE = "Schulschluss 12 Uhr"
 HALF_DAY_NOTE = "Der Unterricht endet an diesem Tag um 12 Uhr."
@@ -213,15 +217,17 @@ def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
                 f"Implausible record (end < start): {raw_summary} {start} → {end}"
             )
 
-        # UID is bound to the record as fetched, before normalisation, so a
-        # source-side one-day quirk does not shift existing subscriptions.
-        uid = make_uid(raw_summary, start, end)
-
         if end == start:
             # Source inconsistency: most records use an exclusive end date,
             # but some single-day entries ship end == start. Normalise to a
             # proper one-day all-day event.
             end = start + timedelta(days=1)
+
+        # Hashed *after* the normalisation above, matching what the feed has
+        # always published for these records. Hashing the raw end instead would
+        # hand every end == start record a new UID and resync it for existing
+        # subscribers — the one thing the UID design exists to prevent.
+        uid = make_uid(raw_summary, start, end)
 
         if end <= cutoff:
             continue
@@ -232,6 +238,9 @@ def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
         # anything longer would silently lose its remaining days.
         half_day = bool(HALF_DAY_RE.match(summary)) and (end - start).days == 1
         if half_day:
+            if summary != HALF_DAY_TITLE:
+                # Canonicalise the title but never drop the source's wording.
+                note = " · ".join(p for p in (summary, note) if p)
             summary = HALF_DAY_TITLE
 
         events.append(
@@ -312,6 +321,7 @@ def sanity_check(
     records: list[dict],
     events: list[SchoolEvent],
     ics_bytes: bytes,
+    today: date,
 ) -> None:
     """Fail hard before deployment if the feed looks broken."""
     if len(records) < MIN_EXPECTED_EVENTS:
@@ -332,7 +342,7 @@ def sanity_check(
         )
 
     latest_end = max(parse_date(r["end_date"]) for r in records)
-    if latest_end < date.today():
+    if latest_end < today:
         raise RuntimeError(
             f"Latest event ends {latest_end}, entirely in the past; "
             "source data looks stale or wrong."
@@ -398,7 +408,7 @@ def main() -> int:
     events = select_events(records, cutoff)
     cal = build_calendar(events)
     ics_bytes = cal.to_ical()
-    sanity_check(records, events, ics_bytes)
+    sanity_check(records, events, ics_bytes, today)
 
     # Rendered before the first write so a template error aborts the run while
     # the previously deployed feed is still the last thing on Pages.
