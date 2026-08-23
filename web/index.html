@@ -132,6 +132,16 @@
   .meta div { min-width: 8rem; }
   .meta b { display: block; color: var(--text); font-size: .95rem; font-weight: 600; }
 
+  /* Feed variants */
+  .variant {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.1rem 1.15rem; margin-bottom: .9rem;
+  }
+  .variant h3 { margin: 0 0 .3rem; }
+  .variant p { margin: 0 0 .75rem; color: var(--text-muted); font-size: .93rem; }
+  .count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .count::before { content: "· "; }
+
   /* Year overview */
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 0 1.5rem; }
   table.year {
@@ -204,7 +214,7 @@
     <p class="feed-label">Diese Adresse im Kalender eintragen</p>
     <div class="feed-row">
       <div class="feed-url" id="feed-url">https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics</div>
-      <button class="copy" id="copy-btn" type="button" data-url="https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Kopieren</button>
+      <button class="copy" type="button" data-url="https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Kopieren</button>
     </div>
   </div>
 
@@ -289,7 +299,8 @@
     1. August. Sie stehen zwar im Originaldatensatz, liegen aber fast immer
     ohnehin in den Ferien oder auf einem Wochenende und würden dieselben Tage ein
     zweites Mal belegen. Für Feiertage gibt es in jeder Kalender-App einen
-    eigenen Schweizer Feiertagskalender.
+    eigenen Schweizer Feiertagskalender — und wer sie trotzdem im selben Abo
+    haben möchte, findet weiter unten eine Variante damit.
   </p>
 
   <div class="note">
@@ -302,6 +313,15 @@
       oder offen haben. Beides erfährst du bei deiner Schule.
     </p>
   </div>
+
+  <h2>Andere Zusammenstellungen</h2>
+
+  <p>
+    Falls die Standardauswahl nicht passt, gibt es denselben Datenbestand in
+    zwei weiteren Zuschnitten. Es genügt, einen davon zu abonnieren.
+  </p>
+
+{{VARIANT_ROWS}}
 
   <h2>Wenn etwas nicht stimmt</h2>
 
@@ -335,21 +355,12 @@
 
 <script>
   (function () {
-    var btn = document.getElementById('copy-btn');
-    if (!btn) return;
-    var original = btn.textContent;
-    var timer = null;
+    // Every .copy button carries its own URL; the first one also has a visible
+    // URL node next to it that can be selected when the clipboard is blocked.
+    var buttons = document.querySelectorAll('button.copy');
 
-    function flash(message) {
-      btn.textContent = message;
-      clearTimeout(timer);
-      timer = setTimeout(function () { btn.textContent = original; }, 1800);
-    }
-
-    // Selects the URL text so the user can copy manually when the
-    // Clipboard API is unavailable (older browsers, non-secure contexts).
-    function selectUrl() {
-      var node = document.getElementById('feed-url');
+    function selectNearbyUrl(btn) {
+      var node = btn.parentNode && btn.parentNode.querySelector('.feed-url');
       if (!node || !window.getSelection) return;
       var range = document.createRange();
       range.selectNodeContents(node);
@@ -358,17 +369,28 @@
       sel.addRange(range);
     }
 
-    btn.addEventListener('click', function () {
-      var url = btn.getAttribute('data-url');
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(
-          function () { flash('Kopiert'); },
-          function () { selectUrl(); flash('Bitte selbst kopieren'); }
-        );
-      } else {
-        selectUrl();
-        flash('Bitte selbst kopieren');
+    Array.prototype.forEach.call(buttons, function (btn) {
+      var original = btn.textContent;
+      var timer = null;
+
+      function flash(message) {
+        btn.textContent = message;
+        clearTimeout(timer);
+        timer = setTimeout(function () { btn.textContent = original; }, 1800);
       }
+
+      btn.addEventListener('click', function () {
+        var url = btn.getAttribute('data-url');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(
+            function () { flash('Kopiert'); },
+            function () { selectNearbyUrl(btn); flash('Bitte selbst kopieren'); }
+          );
+        } else {
+          selectNearbyUrl(btn);
+          flash('Bitte selbst kopieren');
+        }
+      });
     });
   })();
 </script>
