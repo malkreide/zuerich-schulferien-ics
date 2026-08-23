@@ -2,6 +2,7 @@
 repo_name: zuerich-schulferien-ics
 title: Zürich Schulferien ICS Feed
 description: Subscribable iCal feed for Zurich public school holidays, generated from Open Data Zurich (CKAN)
+homepage: https://malkreide.github.io/zuerich-schulferien-ics/
 topics: [icalendar, ics, swiss-open-data, open-data, zurich, github-actions, python, education]
 project_type: other
 visibility: public
