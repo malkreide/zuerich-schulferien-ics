@@ -3,7 +3,7 @@ repo_name: zuerich-schulferien-ics
 title: Zürich Schulferien ICS Feed
 description: Subscribable iCal feed for Zurich public school holidays, generated from Open Data Zurich (CKAN)
 homepage: https://malkreide.github.io/zuerich-schulferien-ics/
-topics: [icalendar, ics, swiss-open-data, open-data, zurich, github-actions, python, education]
+topics: [icalendar, ics, school-holidays, education, zurich, switzerland, swiss-open-data, python]
 project_type: other
 visibility: public
 license: MIT
@@ -13,3 +13,8 @@ default_branch: main
 language: python
 version: 2.0.0
 confirmed: true
+# Backend B (GitHub-MCP-Tools) hat kein Topic-Tool. `topics` oben ist die
+# Quelle der Wahrheit; auf GitHub stehen noch die alten acht. Einmal unter
+# Settings → Topics angleichen, dann diesen Block entfernen.
+offen:
+  - "topics — Stand GitHub: education, github-actions, icalendar, ics, open-data, python, swiss-open-data, zurich"
