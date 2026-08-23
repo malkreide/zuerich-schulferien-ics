@@ -10,3 +10,10 @@ line-length = 88
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# generate_ics.py sits at the repo root, not in a package. Without this the
+# console-script `pytest` (as CI invokes it) cannot import it — only
+# `python -m pytest` would work, because that alone puts the CWD on sys.path.
+pythonpath = ["."]

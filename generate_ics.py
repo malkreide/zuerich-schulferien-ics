@@ -9,10 +9,27 @@ Design decisions
 - The CKAN ``end_date`` is already *exclusive* (iCal convention), verified
   against official holiday dates (e.g. Sportferien 2026: Feb 9-20 is stored
   as start 2026-02-09, end 2026-02-21). Therefore NO +1 day correction is
-  applied. Do not "fix" this.
-- UIDs are deterministic SHA-256 hashes over (summary, start, end). A changed
-  date therefore appears to clients as "old event removed, new event added",
-  which is acceptable for an informational feed and avoids state management.
+  applied. Do not "fix" this. ``tests/test_generate_ics.py`` guards it.
+- The source mixes school entries (prefixed ``Schulen Stadt Zürich``) with
+  plain public holidays (Neujahrstag, Ostersonntag, Nationalfeiertag, …).
+  Only school entries are published: 94 of 97 holiday records in a typical
+  window fall *inside* a school-free block anyway, and 22 land on weekends,
+  so publishing them buries the school dates the feed exists for. Subscribers
+  who want public holidays already have a calendar for them.
+- Titles are display strings, not database strings. The redundant
+  ``Schulen Stadt Zürich schulfrei:`` prefix is dropped (the calendar is
+  already named) and a trailing parenthetical is moved into DESCRIPTION, so
+  a 110-character record renders as "Frühlingsferien" in a month view
+  without losing a word.
+- ``Schulschluss 12 Uhr`` is emitted as a *timed* event at 12:00
+  Europe/Zurich, not as an all-day event. It is the one entry where the day
+  is not free: rendering it like a holiday is what a parent misreads.
+- UIDs are deterministic SHA-256 hashes over the *raw* source summary plus
+  the source dates. Hashing the raw rather than the cleaned title keeps UIDs
+  stable across title changes, so existing subscriptions update in place
+  instead of resyncing. A changed *date* still appears as "old event
+  removed, new event added", which is acceptable for an informational feed
+  and avoids state management.
 - The script fails hard (non-zero exit) on implausible data so that a broken
   CKAN response never overwrites the last known-good feed on GitHub Pages.
 - Only events reaching into the current or the two preceding calendar years
@@ -30,11 +47,13 @@ from __future__ import annotations
 import hashlib
 import re
 import sys
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
-from icalendar import Calendar, Event, vText
+from icalendar import Calendar, Event, Timezone, vText
 
 CKAN_BASE = "https://data.stadt-zuerich.ch/api/3/action/datastore_search"
 RESOURCE_ID = "aad477f6-db39-4d1b-92d8-0885f2d363d1"
@@ -49,10 +68,49 @@ UID_DOMAIN = "zuerich-schulferien-ics.malkreide.github.io"
 # day in 2026 the feed starts at 2024-01-01.
 CUTOFF_YEARS_BACK = 2
 
+# Every school record in the source carries this prefix; plain public holidays
+# do not. This is the only marker the dataset offers to tell them apart.
+SCHOOL_RECORD_RE = re.compile(r"^Schulen Stadt Zürich\b")
+# ... in two spellings: "Schulen Stadt Zürich: X" and "… schulfrei: X".
+TITLE_PREFIX_RE = re.compile(r"^Schulen Stadt Zürich(?:\s+schulfrei)?:\s*")
+# A trailing parenthetical, optionally preceded by the source's footnote
+# asterisk: "Frühlingsferien* (ausnahmsweise KW 16 & 17, …)".
+TRAILING_NOTE_RE = re.compile(r"\s*\*?\s*\(([^()]*)\)\s*$")
+# The source spells this both with and without "um".
+HALF_DAY_RE = re.compile(r"^Schulschluss\s+(?:um\s+)?12\s+Uhr$", re.IGNORECASE)
+
+HALF_DAY_TITLE = "Schulschluss 12 Uhr"
+HALF_DAY_NOTE = "Der Unterricht endet an diesem Tag um 12 Uhr."
+HALF_DAY_START = time(12, 0)
+# A point in time cannot be rendered by most clients, so the event gets a
+# short visible block at noon rather than a zero-length duration.
+HALF_DAY_DURATION = timedelta(minutes=30)
+LOCAL_TZ = ZoneInfo("Europe/Zurich")
+
 # Sanity gate thresholds
 MIN_EXPECTED_EVENTS = 30
-MIN_EXPECTED_PUBLISHED = 10
+MIN_EXPECTED_PUBLISHED = 20
+# Share of fetched records that must look like school records. Guards against
+# the city renaming the prefix, which would silently empty the feed.
+MIN_SCHOOL_SHARE = 0.3
 REQUEST_TIMEOUT = 30
+
+
+@dataclass(frozen=True)
+class SchoolEvent:
+    """One publishable entry, already cleaned for display."""
+
+    summary: str
+    start: date
+    end: date  # exclusive, iCal convention
+    uid: str
+    note: str | None = None
+    half_day: bool = False
+
+    @property
+    def description(self) -> str | None:
+        parts = [p for p in (HALF_DAY_NOTE if self.half_day else None, self.note) if p]
+        return " ".join(parts) or None
 
 
 def fetch_all_records() -> list[dict]:
@@ -93,37 +151,72 @@ def parse_date(value: str) -> date:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
 
 
-def make_uid(summary: str, start: date, end: date) -> str:
-    raw = f"volksschule-zuerich-{summary}-{start.isoformat()}-{end.isoformat()}"
+def make_uid(raw_summary: str, start: date, end: date) -> str:
+    """Derive a stable UID from the *source* record, not the display title.
+
+    Cleaning the title must not resync every subscriber, so the hash input is
+    deliberately the untouched CKAN summary.
+    """
+    raw = f"volksschule-zuerich-{raw_summary}-{start.isoformat()}-{end.isoformat()}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return f"{digest}@{UID_DOMAIN}"
 
 
-def cutoff_date(today: date) -> date:
-    """First day that still gets published: 1 Jan, CUTOFF_YEARS_BACK years back."""
-    return date(today.year - CUTOFF_YEARS_BACK, 1, 1)
+def is_school_record(summary: str) -> bool:
+    """True for school entries, False for the plain public holidays alongside."""
+    return bool(SCHOOL_RECORD_RE.match(summary.strip()))
 
 
-def select_events(
-    records: list[dict], cutoff: date
-) -> list[tuple[str, date, date]]:
-    """Parse, normalise and filter records into sorted (summary, start, end).
+def clean_title(raw: str) -> tuple[str, str | None]:
+    """Strip the boilerplate prefix and lift a trailing parenthetical out.
 
-    ``end`` is the exclusive iCal end date. A record is dropped only when it
-    has *finished* before ``cutoff``; one straddling the cutoff (e.g.
-    Weihnachtsferien 2024/25) is kept in full so the holiday is not truncated.
+    Returns ``(display_title, note)``. The note keeps the source wording
+    verbatim so shortening the title loses no information.
     """
-    events: list[tuple[str, date, date]] = []
+    title = TITLE_PREFIX_RE.sub("", raw.strip()).strip()
+
+    note: str | None = None
+    match = TRAILING_NOTE_RE.search(title)
+    if match:
+        note = match.group(1).strip() or None
+        title = title[: match.start()]
+    title = title.strip().rstrip("*").strip()
+
+    if note:
+        # Source inconsistency: "(KW29-33)" alongside "(KW 29-33)".
+        note = re.sub(r"\bKW(\d)", r"KW \1", note)
+
+    # A record consisting of nothing but the prefix would otherwise vanish.
+    return title or raw.strip(), note
+
+
+def select_events(records: list[dict], cutoff: date) -> list[SchoolEvent]:
+    """Parse, filter and normalise records into sorted ``SchoolEvent``s.
+
+    Public holidays are dropped (see module docstring). ``end`` is the
+    exclusive iCal end date. A record is dropped only when it has *finished*
+    before ``cutoff``; one straddling the cutoff (e.g. Weihnachtsferien
+    2024/25) is kept in full so the holiday is not truncated.
+    """
+    events: list[SchoolEvent] = []
 
     for rec in records:
+        raw_summary = rec["summary"].strip()
+        if not is_school_record(raw_summary):
+            continue
+
         start = parse_date(rec["start_date"])
         end = parse_date(rec["end_date"])  # already exclusive in the source
-        summary = rec["summary"].strip()
 
         if end < start:
             raise RuntimeError(
-                f"Implausible record (end < start): {summary} {start} → {end}"
+                f"Implausible record (end < start): {raw_summary} {start} → {end}"
             )
+
+        # UID is bound to the record as fetched, before normalisation, so a
+        # source-side one-day quirk does not shift existing subscriptions.
+        uid = make_uid(raw_summary, start, end)
+
         if end == start:
             # Source inconsistency: most records use an exclusive end date,
             # but some single-day entries ship end == start. Normalise to a
@@ -133,12 +226,29 @@ def select_events(
         if end <= cutoff:
             continue
 
-        events.append((summary, start, end))
+        summary, note = clean_title(raw_summary)
 
-    return sorted(events, key=lambda e: (e[1], e[0]))
+        # Only a genuine single-day record can become a timed noon event;
+        # anything longer would silently lose its remaining days.
+        half_day = bool(HALF_DAY_RE.match(summary)) and (end - start).days == 1
+        if half_day:
+            summary = HALF_DAY_TITLE
+
+        events.append(
+            SchoolEvent(
+                summary=summary,
+                start=start,
+                end=end,
+                uid=uid,
+                note=note,
+                half_day=half_day,
+            )
+        )
+
+    return sorted(events, key=lambda e: (e.start, e.summary))
 
 
-def build_calendar(events: list[tuple[str, date, date]]) -> Calendar:
+def build_calendar(events: list[SchoolEvent]) -> Calendar:
     cal = Calendar()
     cal.add("prodid", "-//zuerich-schulferien-ics//Schulferien Generator//DE")
     cal.add("version", "2.0")
@@ -161,14 +271,35 @@ def build_calendar(events: list[tuple[str, date, date]]) -> Calendar:
     cal.add("x-published-ttl", "PT24H")
     cal.add("color", "blue")
 
+    # A TZID reference must resolve inside the same calendar (RFC 5545 §3.2.19),
+    # so the VTIMEZONE ships only when a timed event actually needs it.
+    if any(e.half_day for e in events):
+        cal.add_component(
+            Timezone.from_tzid(
+                "Europe/Zurich",
+                first_date=datetime(min(e.start for e in events).year, 1, 1),
+                last_date=datetime(max(e.end for e in events).year + 1, 1, 1),
+            )
+        )
+
     now_utc = datetime.now(timezone.utc)
 
-    for summary, start, end in events:
+    for ev in events:
         event = Event()
-        event.add("uid", vText(make_uid(summary, start, end)))
-        event.add("summary", summary)
-        event.add("dtstart", start)  # date value → VALUE=DATE (all-day)
-        event.add("dtend", end)
+        event.add("uid", vText(ev.uid))
+        event.add("summary", ev.summary)
+
+        if ev.half_day:
+            begins = datetime.combine(ev.start, HALF_DAY_START, tzinfo=LOCAL_TZ)
+            event.add("dtstart", begins)
+            event.add("dtend", begins + HALF_DAY_DURATION)
+        else:
+            event.add("dtstart", ev.start)  # date value → VALUE=DATE (all-day)
+            event.add("dtend", ev.end)
+
+        if ev.description:
+            event.add("description", ev.description)
+
         event.add("dtstamp", now_utc)
         event.add("transp", "TRANSPARENT")  # do not block free/busy time
         event.add("categories", ["Schulferien"])
@@ -179,7 +310,7 @@ def build_calendar(events: list[tuple[str, date, date]]) -> Calendar:
 
 def sanity_check(
     records: list[dict],
-    events: list[tuple[str, date, date]],
+    events: list[SchoolEvent],
     ics_bytes: bytes,
 ) -> None:
     """Fail hard before deployment if the feed looks broken."""
@@ -187,6 +318,17 @@ def sanity_check(
         raise RuntimeError(
             f"Only {len(records)} events fetched (expected >= {MIN_EXPECTED_EVENTS}); "
             "refusing to publish a possibly truncated feed."
+        )
+
+    # The school filter keys off a prefix the city controls. If that prefix
+    # ever changes, fail loudly here rather than ship an empty calendar.
+    school_records = sum(1 for r in records if is_school_record(r["summary"]))
+    share = school_records / len(records)
+    if share < MIN_SCHOOL_SHARE:
+        raise RuntimeError(
+            f"Only {school_records} of {len(records)} records match "
+            f"{SCHOOL_RECORD_RE.pattern!r} ({share:.0%} < {MIN_SCHOOL_SHARE:.0%}); "
+            "the source may have renamed the school prefix."
         )
 
     latest_end = max(parse_date(r["end_date"]) for r in records)
@@ -213,9 +355,12 @@ def sanity_check(
         )
 
 
-def render_page(
-    events: list[tuple[str, date, date]], built: date, template: Path
-) -> str:
+def cutoff_date(today: date) -> date:
+    """First day that still gets published: 1 Jan, CUTOFF_YEARS_BACK years back."""
+    return date(today.year - CUTOFF_YEARS_BACK, 1, 1)
+
+
+def render_page(events: list[SchoolEvent], built: date, template: Path) -> str:
     """Fill the landing page template with what this run actually produced.
 
     The page states an event count and a coverage end date. Those must come
@@ -226,7 +371,7 @@ def render_page(
     """
     # ``events`` holds exclusive iCal end dates; the last day a subscriber
     # actually sees is the day before.
-    last_day = max(end for _, _, end in events) - timedelta(days=1)
+    last_day = max(e.end for e in events) - timedelta(days=1)
 
     values = {
         "EVENT_COUNT": str(len(events)),
@@ -265,10 +410,10 @@ def main() -> int:
 
     latest = max(parse_date(r["end_date"]) for r in records)
     print(
-        f"OK: {len(events)} of {len(records)} events written to {OUTPUT_FILE} "
+        f"OK: {len(events)} of {len(records)} records written to {OUTPUT_FILE} "
         f"({len(ics_bytes)} bytes; cutoff {cutoff}, "
-        f"{len(records) - len(events)} past events skipped, "
-        f"latest event ends {latest})."
+        f"{sum(1 for e in events if e.half_day)} half-day events, "
+        f"latest source event ends {latest})."
     )
     print(f"OK: landing page written to {PAGE_FILE} ({len(page_html)} chars).")
     return 0
