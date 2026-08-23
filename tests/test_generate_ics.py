@@ -20,11 +20,16 @@ from generate_ics import (
     build_calendar,
     clean_title,
     cutoff_date,
+    format_period,
     is_school_record,
+    keep_dates_together,
     make_uid,
     parse_date,
+    parse_stamp,
     render_page,
+    render_year_tables,
     sanity_check,
+    school_year,
     select_events,
 )
 
@@ -670,3 +675,291 @@ def test_sanity_gate_takes_the_run_date_rather_than_reading_the_clock():
     sanity_check(records, events, ics, date(2026, 8, 23))
     with pytest.raises(RuntimeError, match="entirely in the past"):
         sanity_check(records, events, ics, date(2099, 1, 1))
+
+
+# --------------------------------------------------------------------------
+# Stable DTSTAMP — identical input must produce identical bytes
+# --------------------------------------------------------------------------
+
+
+def stamped(summary: str, start: str, end: str, created: str | None) -> dict:
+    record = rec(summary, start, end)
+    if created is not None:
+        record["created_date"] = f"{created}T00:00:00Z"
+    return record
+
+
+def test_dtstamp_comes_from_the_source_record_not_the_clock():
+    events = select_events(
+        [
+            stamped(
+                "Schulen Stadt Zürich: Sportferien",
+                "2026-02-09",
+                "2026-02-21",
+                "2023-11-13",
+            )
+        ],
+        CUTOFF,
+    )
+    ics = build_calendar(events).to_ical().decode("utf-8")
+
+    assert "DTSTAMP:20231113T000000Z" in ics
+
+
+def test_two_runs_produce_byte_identical_output():
+    """The nightly rebuild must not rotate the ETag when nothing changed.
+
+    A wall-clock DTSTAMP made every run emit a different file, so every
+    subscriber re-downloaded the whole feed each night for no reason.
+    """
+    records = [
+        stamped(
+            "Schulen Stadt Zürich: Sportferien",
+            "2026-02-09",
+            "2026-02-21",
+            "2023-11-13",
+        ),
+        stamped(
+            "Schulen Stadt Zürich schulfrei: Schulschluss um 12 Uhr",
+            "2026-12-18",
+            "2026-12-19",
+            "2022-01-04",
+        ),
+    ]
+
+    first = build_calendar(select_events(records, CUTOFF)).to_ical()
+    second = build_calendar(select_events(records, CUTOFF)).to_ical()
+
+    assert first == second
+    assert b"DTSTAMP:20231113T000000Z" in first
+
+
+def test_generated_bytes_carry_no_trace_of_today():
+    """Guards against any wall-clock value leaking back into the output."""
+    events = select_events(
+        [
+            stamped(
+                "Schulen Stadt Zürich: Sportferien",
+                "2026-02-09",
+                "2026-02-21",
+                "2023-11-13",
+            )
+        ],
+        CUTOFF,
+    )
+    ics = build_calendar(events).to_ical().decode("utf-8")
+
+    assert date.today().strftime("%Y%m%d") not in ics
+
+
+def test_missing_created_date_still_yields_a_deterministic_stamp():
+    """The fallback is derived from the record, so output stays reproducible."""
+    record = stamped(
+        "Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21", None
+    )
+
+    assert parse_stamp(record, date(2026, 2, 9)) == parse_stamp(
+        record, date(2026, 2, 9)
+    )
+    assert parse_stamp(record, date(2026, 2, 9)).date() == date(2026, 2, 9)
+
+
+def test_stamp_is_normalised_to_utc():
+    record = rec("Schulen Stadt Zürich: Sportferien", "2026-02-09", "2026-02-21")
+    record["created_date"] = "2023-11-13T08:30:00+02:00"
+
+    stamp = parse_stamp(record, date(2026, 2, 9))
+
+    assert stamp.hour == 6 and stamp.tzinfo is not None
+
+
+# --------------------------------------------------------------------------
+# A spelling variant is not extra information
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Schulen Stadt Zürich schulfrei: Schulschluss um 12 Uhr",
+        "Schulen Stadt Zürich schulfrei: Schulschluss um 12.00 Uhr",
+        "Schulen Stadt Zürich schulfrei: Schulschluss 12 Uhr",
+    ],
+)
+def test_half_day_spelling_variant_is_not_repeated_in_the_description(raw):
+    events = select_events([rec(raw, "2026-12-18", "2026-12-19")], CUTOFF)
+
+    assert events[0].description == "Der Unterricht endet an diesem Tag um 12 Uhr."
+
+
+# --------------------------------------------------------------------------
+# Year overview on the landing page
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 8, 1), 2026),  # first day of the new school year
+        (date(2026, 8, 17), 2026),  # 1. Schultag
+        (date(2027, 7, 20), 2026),  # summer holidays close the year that ends
+        (date(2027, 7, 31), 2026),
+        (date(2027, 8, 1), 2027),
+    ],
+)
+def test_school_year_boundary_is_the_first_of_august(day, expected):
+    assert school_year(day) == expected
+
+
+def test_period_of_a_multi_day_holiday_states_the_year_once():
+    events = select_events(
+        [rec("Schulen Stadt Zürich: Herbstferien", "2026-10-05", "2026-10-17")], CUTOFF
+    )
+
+    assert format_period(events[0]) == ("Mo 5.10. – Fr 16.10.2026", "12 Tage")
+
+
+def test_period_of_a_holiday_crossing_new_year_states_both_years():
+    events = select_events(
+        [rec("Schulen Stadt Zürich: Weihnachtsferien", "2026-12-21", "2027-01-02")],
+        CUTOFF,
+    )
+
+    assert format_period(events[0]) == ("Mo 21.12.2026 – Fr 1.1.2027", "12 Tage")
+
+
+def test_period_of_a_single_day():
+    events = select_events(
+        [
+            rec(
+                "Schulen Stadt Zürich schulfrei: Knabenschiessen",
+                "2026-09-14",
+                "2026-09-15",
+            )
+        ],
+        CUTOFF,
+    )
+
+    assert format_period(events[0]) == ("Mo 14.9.2026", "1 Tag")
+
+
+def test_period_of_a_half_day_is_labelled_as_such():
+    events = select_events(
+        [
+            rec(
+                "Schulen Stadt Zürich schulfrei: Schulschluss um 12 Uhr",
+                "2026-12-18",
+                "2026-12-19",
+            )
+        ],
+        CUTOFF,
+    )
+
+    assert format_period(events[0]) == ("Fr 18.12.2026", "halber Tag")
+
+
+def test_overview_covers_the_current_and_the_next_school_year():
+    records = [
+        rec("Schulen Stadt Zürich: Herbstferien", "2026-10-05", "2026-10-17"),
+        rec("Schulen Stadt Zürich: Herbstferien", "2027-10-11", "2027-10-23"),
+        rec("Schulen Stadt Zürich: Herbstferien", "2028-10-09", "2028-10-21"),
+    ]
+
+    html_out = render_year_tables(select_events(records, CUTOFF), date(2026, 8, 23))
+
+    assert "Schuljahr 2026/27" in html_out
+    assert "Schuljahr 2027/28" in html_out
+    assert "Schuljahr 2028/29" not in html_out
+
+
+def test_overview_lists_events_in_chronological_order():
+    records = [
+        rec("Schulen Stadt Zürich: Sportferien", "2027-02-15", "2027-02-27"),
+        rec("Schulen Stadt Zürich: Herbstferien", "2026-10-05", "2026-10-17"),
+        rec("Schulen Stadt Zürich: 1. Schultag", "2026-08-17", "2026-08-18"),
+    ]
+
+    html_out = render_year_tables(select_events(records, CUTOFF), date(2026, 8, 23))
+    order = [html_out.index(s) for s in ("1. Schultag", "Herbstferien", "Sportferien")]
+
+    assert order == sorted(order)
+
+
+def test_overview_escapes_titles_and_notes():
+    """Titles come from an external source and land in HTML."""
+    events = select_events(
+        [
+            rec(
+                "Schulen Stadt Zürich: Ferien <script> (a & b)",
+                "2026-10-05",
+                "2026-10-17",
+            )
+        ],
+        CUTOFF,
+    )
+
+    html_out = render_year_tables(events, date(2026, 8, 23))
+
+    assert "<script>" not in html_out
+    assert "&lt;script&gt;" in html_out
+    assert "a &amp; b" in html_out
+
+
+def test_overview_shows_the_note_as_a_hint():
+    events = select_events(
+        [
+            rec(
+                "Schulen Stadt Zürich: Sommerferien (KW 29-33)",
+                "2027-07-19",
+                "2027-08-21",
+            )
+        ],
+        CUTOFF,
+    )
+
+    html_out = render_year_tables(events, date(2026, 8, 23))
+
+    assert 'class="hint">KW 29-33<' in html_out
+
+
+def test_overview_says_so_rather_than_rendering_nothing():
+    events = select_events(
+        [rec("Schulen Stadt Zürich: Herbstferien", "2024-10-07", "2024-10-19")], CUTOFF
+    )
+
+    assert "keine Termine" in render_year_tables(events, date(2026, 8, 23))
+
+
+def test_real_template_renders_the_overview():
+    """The committed template must actually consume the generated tables."""
+    records = [
+        rec("Schulen Stadt Zürich: Herbstferien", "2026-10-05", "2026-10-17"),
+        rec("Schulen Stadt Zürich: Sportferien", "2027-02-15", "2027-02-27"),
+    ]
+
+    page = render_page(
+        select_events(records, CUTOFF), date(2026, 8, 23), generate_ics.PAGE_TEMPLATE
+    )
+
+    assert "Schuljahr 2026/27" in page
+    assert "Mo\u00a05.10. – Fr\u00a016.10.2026" in page
+    assert "{{" not in page
+
+
+def test_dates_stay_atomic_so_a_cell_breaks_only_between_them():
+    """On a phone the cell wraps; it must not wrap inside a single date."""
+    assert keep_dates_together("Mo 5.10. – Fr 16.10.2026") == (
+        "Mo\u00a05.10. – Fr\u00a016.10.2026"
+    )
+
+
+def test_overview_binds_dates_with_a_non_breaking_space():
+    events = select_events(
+        [rec("Schulen Stadt Zürich: Weihnachtsferien", "2026-12-21", "2027-01-02")],
+        CUTOFF,
+    )
+
+    html_out = render_year_tables(events, date(2026, 8, 23))
+
+    assert "Mo\u00a021.12.2026 – Fr\u00a01.1.2027" in html_out
+    assert "Mo 21.12.2026" not in html_out

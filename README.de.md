@@ -80,6 +80,11 @@ diesem Verhalten nicht betroffen.
 ## Funktionen
 
 - Nächtliche automatische Aktualisierung aus der Single Source of Truth (CKAN-Datastore)
+- **Jahresübersicht** auf der Landing-Page — laufendes und kommendes Schuljahr
+  als Tabelle, ohne Abo
+- **Reproduzierbare Ausgabe** — `DTSTAMP` stammt aus den Quelldaten, nicht von der
+  Wanduhr. Gleiche Eingabe, gleiche Bytes: der nächtliche Lauf löst keinen
+  unnötigen Neu-Download bei allen Abonnenten aus
 - **Nur Schultermine** — allgemeine Feiertage werden herausgefiltert, weil sie
   fast immer ohnehin in den Ferien oder auf einem Wochenende liegen
 - **Kalendertaugliche Titel** — das Präfix `Schulen Stadt Zürich schulfrei:`
