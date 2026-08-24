@@ -151,6 +151,18 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
   new event added" rather than an in-place update. This is intentional: it keeps
   the generator stateless.
 
+- The city publishes these dates **twice**: as the CKAN dataset this feed is
+  built from, and as one static `.ics` per school year on the
+  [Schulferien page](https://www.stadt-zuerich.ch/de/bildung/volksschule/schulferien.html).
+  `scripts/compare_official_ics.py` checks the two against each other. As of
+  2026-08-24, across all four offered school years, 104 records are identical
+  and nothing differs unexplained. The only two systematic differences favour
+  CKAN: the per-year `.ics` files cut the summer holidays at the 1 August
+  school-year boundary (CKAN carries the block whole), and CKAN holds one
+  same-span duplicate among the public holidays (`Pfingsten` /
+  `Pfingstsonntag`, 2029-05-20) that the feed filters out anyway. There is
+  therefore nothing in the `.ics` handover that the open dataset lacks.
+
 ## Prerequisites
 
 - Python 3.10+
@@ -162,6 +174,8 @@ treat iCalendar as UTF-8 per RFC 5545 and are unaffected.
 pip install -r requirements-dev.txt
 pytest -q                 # test suite, runs offline against fixtures
 python generate_ics.py    # writes public/ferien.ics + public/index.html
+
+python scripts/compare_official_ics.py   # needs network: compare both of the city's exports
 ```
 
 ## Project Structure
@@ -170,12 +184,14 @@ python generate_ics.py    # writes public/ferien.ics + public/index.html
 zuerich-schulferien-ics/
 ├── generate_ics.py           # fetch CKAN → filter → build ICS + page → sanity gate
 ├── tests/                    # pytest suite on fixtures, no network access
+├── scripts/compare_official_ics.py  # cross-check against the city's own .ics downloads
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── web/index.html            # landing page template (subscription instructions)
 ├── public/ferien.ics         # generated feed (deployed to GitHub Pages)
 ├── public/index.html         # rendered landing page (deployed alongside)
-└── .github/workflows/deploy.yml  # nightly cron + manual trigger, OIDC deploy
+├── .github/workflows/deploy.yml    # nightly cron + manual trigger, OIDC deploy, failure alarm
+└── .github/workflows/keepalive.yml # monthly heartbeat, keeps the cron from being auto-disabled
 ```
 
 ## Changelog

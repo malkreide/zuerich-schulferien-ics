@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `scripts/compare_official_ics.py` — cross-checks the city's official
+  per-school-year `.ics` downloads against the CKAN dataset the feed is built
+  from. The City of Zurich publishes the same dates twice, from separate
+  exports, and nothing guarantees they stay in step. The script scrapes the
+  download links off the Schulferien page (hard-coding them would silently
+  compare fewer years each year), classifies the two *expected* differences,
+  and exits non-zero when a school record appears in one export but not the
+  other. Needs network, so it stays out of the offline `pytest` gate; the
+  parsing and classification logic is covered by
+  `tests/test_compare_official_ics.py` (23 tests).
+
+  First run, 2026-08-24, over all four offered school years (2026/27–2029/30):
+  **104 records identical, zero unexplained differences in either direction.**
+  The two expected classes: four summer holidays that the per-year files cut
+  at the 1 August school-year boundary where CKAN carries the whole block
+  (`2026-07-13 → 2026-08-15` versus `2026-08-01 → 2026-08-15`), and one
+  same-span duplicate in CKAN (`Pfingsten` alongside `Pfingstsonntag` on
+  2029-05-20). CKAN is thus the more complete of the two exports, and a
+  manual `.ics` handover adds nothing the feed does not already have.
+- Failure alarm: a nightly run that fails now opens an issue — or comments on
+  the open one — instead of failing silently. The sanity gate deliberately
+  leaves the last known-good feed on Pages, which means a broken source looks
+  exactly like a working one from the outside until somebody opens the Actions
+  tab. Matching is on the exact issue title via the issues API rather than the
+  search API, whose eventual consistency would open a fresh issue every night.
+  Pull requests are excluded — a red check is already visible there.
+- Keepalive workflow: a monthly heartbeat commit to `.github/last-heartbeat`.
+  GitHub disables scheduled workflows in a public repository after 60 days
+  without repository activity, and workflow runs do not count — so a feed that
+  simply works, with nobody pushing to it, switches itself off after two quiet
+  months without anything turning red. GitHub does not document what counts as
+  activity, so this is a mitigation rather than a guarantee; the warning mail
+  GitHub sends before disabling remains the authoritative signal.
+
+### Changed
+- The `push` trigger on `deploy.yml` ignores `.github/last-heartbeat`, so the
+  heartbeat does not cost a second build and deploy on top of the nightly one.
+
 ## [2.0.0] - 2026-08-23
 
 Reshapes the feed around the people who use it: parents with children in
