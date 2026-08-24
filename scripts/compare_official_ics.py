@@ -36,6 +36,12 @@ Exit status is driven by school records only — those are what
 plain public holidays are printed as a warning: the city's own files
 demonstrably omit some, so failing on them would cry wolf.
 
+One case needs its own gate, because agreement is not the same as health: if
+the city renames the ``Schulen Stadt Zürich`` prefix in *both* exports, they
+still match each other perfectly, no drift is found, and this script would
+print an OK for a source that had just emptied the feed. So a run that
+recognises no school record at all is an error, not a pass.
+
 Usage::
 
     python scripts/compare_official_ics.py
@@ -49,8 +55,9 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -100,11 +107,35 @@ class Report:
     duplicated: set[Entry]  # in CKAN, a same-span twin of a record the city has
     only_ics: set[Entry]  # unexplained
     only_ckan: set[Entry]  # unexplained
+    # How many records each export prefixes `Schulen Stadt Zürich`. Zero on
+    # either side means the marker itself is gone, not that the two agree —
+    # see `main()`.
+    city_school: int
+    ckan_school: int
 
     @property
     def drifted(self) -> set[Entry]:
         """Unexplained differences that would reach the published feed."""
         return {e for e in self.only_ics | self.only_ckan if e.school}
+
+    @property
+    def moved(self) -> list[tuple[Entry, Entry]]:
+        """Unexplained pairs that share a title — one event, two dates.
+
+        A rescheduled holiday lands in `only_ics` *and* `only_ckan`, and
+        reporting it as two unrelated lines is how a single date change reads
+        as two separate problems. Pairing is presentation only; both entries
+        stay in their sets and still count towards `drifted`.
+        """
+        by_title: dict[str, Entry] = {e.summary: e for e in self.only_ckan}
+        return sorted(
+            (
+                (ics, by_title[ics.summary])
+                for ics in self.only_ics
+                if ics.summary in by_title
+            ),
+            key=lambda pair: pair[0].start,
+        )
 
 
 def discover_ics_urls(page_html: str, base_url: str = SCHULFERIEN_PAGE) -> list[str]:
@@ -121,13 +152,21 @@ def discover_ics_urls(page_html: str, base_url: str = SCHULFERIEN_PAGE) -> list[
 
 
 def normalise(summary: str) -> str:
-    """Collapse whitespace so a stray trailing blank is not read as drift.
+    """Make two spellings of the same title compare equal.
 
-    Two records in the city's files carry a trailing space that the CKAN
-    export does not (2028 and 2030 Frühlingsferien). That is a formatting
-    artefact of the export, not a different event.
+    Whitespace: two records in the city's files carry a trailing space that
+    the CKAN export does not (2028 and 2030 Frühlingsferien) — a formatting
+    artefact, not a different event.
+
+    Unicode: ``ü`` has two encodings, precomposed (NFC, U+00FC) and decomposed
+    (NFD, ``u`` + U+0308). Both exports use NFC today, but they are produced by
+    different tooling — the ``.ics`` files come out of Outlook — and either
+    could switch without anyone announcing it. Since almost every title here
+    contains ``Zürich``, an unnormalised comparison would then report *every*
+    record as drift in both directions at once. Loud rather than silent, but a
+    false alarm nobody could act on.
     """
-    return " ".join(summary.split())
+    return unicodedata.normalize("NFC", " ".join(summary.split()))
 
 
 def parse_ics(data: bytes) -> set[Entry]:
@@ -135,15 +174,34 @@ def parse_ics(data: bytes) -> set[Entry]:
 
     All-day events arrive as ``date``; a timed one would arrive as
     ``datetime`` and is reduced to its date, since CKAN stores dates only.
+
+    The city's current export always ships ``DTEND``, but RFC 5545 allows an
+    event to carry ``DURATION`` instead, or neither. Reading ``DTEND``
+    unconditionally would turn that into a ``KeyError`` and take down the whole
+    comparison — a crash where a shrug would do.
     """
     entries: set[Entry] = set()
     for event in Calendar.from_ical(data).walk("VEVENT"):
+        if "SUMMARY" not in event or "DTSTART" not in event:
+            raise ValueError(
+                "VEVENT ohne SUMMARY oder DTSTART in der .ics-Datei der Stadt. "
+                "Sie wird still unvollständig verglichen, wenn das übergangen wird."
+            )
         start = event.decoded("DTSTART")
-        end = event.decoded("DTEND")
         if isinstance(start, datetime):
             start = start.date()
-        if isinstance(end, datetime):
-            end = end.date()
+
+        if "DTEND" in event:
+            end = event.decoded("DTEND")
+            if isinstance(end, datetime):
+                end = end.date()
+        elif "DURATION" in event:
+            end = start + event.decoded("DURATION")
+        else:
+            # RFC 5545 §3.6.1: a DATE-valued DTSTART without DTEND or DURATION
+            # is a one-day event. `end` is exclusive here, hence +1.
+            end = start + timedelta(days=1)
+
         entries.add(Entry(start, end, normalise(str(event["SUMMARY"]))))
     return entries
 
@@ -201,6 +259,8 @@ def classify(city: set[Entry], ckan: set[Entry]) -> Report:
         duplicated=duplicated,
         only_ics=only_ics - truncated,
         only_ckan=only_ckan - duplicated,
+        city_school=sum(e.school for e in city),
+        ckan_school=sum(e.school for e in ckan_window),
     )
 
 
@@ -219,7 +279,18 @@ def render(report: Report, sources: list[str]) -> str:
         f"Nur CKAN, Dublette gleicher Daten  : {len(report.duplicated)}",
         f"Unerklärt nur in den .ics          : {len(report.only_ics)}",
         f"Unerklärt nur im CKAN-Datensatz    : {len(report.only_ckan)}",
+        "",
+        f"Schul-Einträge (Präfix erkannt)    : .ics {report.city_school}, "
+        f"CKAN {report.ckan_school}",
     ]
+
+    if report.moved:
+        lines += ["", "--- Gleicher Titel, andere Daten (verschoben?) ---"]
+        for ics_entry, ckan_entry in report.moved:
+            lines.append(f"  {ics_entry.summary}")
+            lines.append(f"    .ics: {ics_entry.start} → {ics_entry.end}")
+            lines.append(f"    CKAN: {ckan_entry.start} → {ckan_entry.end}")
+
     for label, entries in (
         ("An der Schuljahresgrenze gekürzt", report.truncated),
         ("Dubletten im CKAN-Datensatz", report.duplicated),
@@ -252,6 +323,22 @@ def main() -> int:
 
     report = classify(city, records_to_entries(fetch_all_records()))
     print(render(report, urls))
+
+    # Both exports agreeing on zero school records is not agreement, it is the
+    # marker having moved. `drifted` would be empty and this script would print
+    # a reassuring OK for a source that had just emptied the feed —
+    # `generate_ics.py` catches it at MIN_SCHOOL_SHARE, but only after somebody
+    # trusted this run.
+    if not report.city_school or not report.ckan_school:
+        print(
+            "FEHLER: Kein einziger Eintrag trägt das Präfix "
+            f"'Schulen Stadt Zürich' (.ics {report.city_school}, "
+            f"CKAN {report.ckan_school}). Die Quelle hat es vermutlich "
+            "umbenannt — der Feed wäre damit leer, und ein Abgleich ohne "
+            "Schul-Einträge kann keine Entwarnung geben.",
+            file=sys.stderr,
+        )
+        return 2
 
     if report.drifted:
         print(
