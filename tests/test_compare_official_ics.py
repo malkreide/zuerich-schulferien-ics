@@ -8,6 +8,7 @@ a clean run.
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date
 
 import pytest
@@ -222,3 +223,135 @@ class TestClassify:
     def test_empty_city_export_refuses_to_report_success(self) -> None:
         with pytest.raises(ValueError):
             classify(set(), {entry("2026-10-05", "2026-10-17", "Herbstferien")})
+
+
+class TestUnicodeNormalisation:
+    """NFC vs NFD — `ü` has two encodings, and `Zürich` is in nearly every title."""
+
+    def test_decomposed_umlaut_compares_equal(self) -> None:
+        nfc = "Schulen Stadt Zürich: Herbstferien"
+        nfd = unicodedata.normalize("NFD", nfc)
+        assert nfc != nfd  # the fixture is only meaningful if they differ as bytes
+        assert normalise(nfc) == normalise(nfd)
+
+    def test_a_decomposed_export_does_not_drift_wholesale(self) -> None:
+        # Without normalisation this reports two drifts in each direction.
+        titles = [
+            "Schulen Stadt Zürich: Herbstferien",
+            "Schulen Stadt Zürich: Sportferien",
+        ]
+        city = {
+            Entry(date(2026, 10, 5), date(2026, 10, 17), normalise(titles[0])),
+            Entry(date(2027, 2, 8), date(2027, 2, 20), normalise(titles[1])),
+        }
+        ckan = {
+            Entry(
+                date(2026, 10, 5),
+                date(2026, 10, 17),
+                normalise(unicodedata.normalize("NFD", titles[0])),
+            ),
+            Entry(
+                date(2027, 2, 8),
+                date(2027, 2, 20),
+                normalise(unicodedata.normalize("NFD", titles[1])),
+            ),
+        }
+        assert not classify(city, ckan).drifted
+
+    def test_the_prefix_still_matches_after_a_decomposed_title_is_normalised(
+        self,
+    ) -> None:
+        # SCHOOL_RECORD_RE contains a literal `ü`; an NFD title would miss it,
+        # so every record would silently stop counting as a school record.
+        nfd = unicodedata.normalize("NFD", "Schulen Stadt Zürich: Herbstferien")
+        assert Entry(date(2026, 10, 5), date(2026, 10, 17), normalise(nfd)).school
+
+
+class TestSchoolPrefixGate:
+    def test_counts_are_reported_per_export(self) -> None:
+        # Two school records, not one: a count that happens to equal a
+        # hard-coded 1 would pass whether or not anything is counted.
+        city = {
+            entry("2026-10-05", "2026-10-17", "Schulen Stadt Zürich: Herbstferien"),
+            entry("2026-12-19", "2027-01-04", "Schulen Stadt Zürich: Weihnachtsferien"),
+            entry("2026-11-01", "2026-11-02", "Allerheiligen"),
+        }
+        report = classify(city, city)
+        assert (report.city_school, report.ckan_school) == (2, 2)
+
+    def test_a_renamed_prefix_agrees_perfectly_and_counts_zero(self) -> None:
+        # The exports still match each other, so `drifted` is empty. Only the
+        # counts reveal that the marker the feed depends on has gone.
+        renamed = {
+            entry("2026-10-05", "2026-10-17", "Volksschule Zürich: Herbstferien"),
+            entry("2026-12-19", "2027-01-04", "Volksschule Zürich: Weihnachtsferien"),
+        }
+        report = classify(renamed, renamed)
+        assert not report.drifted
+        assert (report.city_school, report.ckan_school) == (0, 0)
+
+    def test_ckan_count_is_taken_within_the_window(self) -> None:
+        # Records outside the compared span must not prop the count up.
+        city = {entry("2026-10-05", "2026-10-17", "Volksschule Zürich: Herbstferien")}
+        ckan = city | {
+            entry("2018-08-01", "2018-08-18", "Schulen Stadt Zürich: Sommerferien")
+        }
+        assert classify(city, ckan).ckan_school == 0
+
+
+class TestParseIcsEdgeCases:
+    def test_duration_is_accepted_instead_of_dtend(self) -> None:
+        raw = (
+            b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n"
+            b"BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261005\r\nDURATION:P12D\r\n"
+            b"SUMMARY:Herbstferien\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        assert parse_ics(raw) == {entry("2026-10-05", "2026-10-17", "Herbstferien")}
+
+    def test_neither_dtend_nor_duration_is_one_day(self) -> None:
+        # RFC 5545 §3.6.1 for a DATE-valued DTSTART.
+        raw = (
+            b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n"
+            b"BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260914\r\n"
+            b"SUMMARY:Knabenschiessen\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        assert parse_ics(raw) == {entry("2026-09-14", "2026-09-15", "Knabenschiessen")}
+
+    def test_a_summaryless_event_is_refused_not_skipped(self) -> None:
+        # Dropping it would shrink the comparison without saying so.
+        raw = (
+            b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n"
+            b"BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261005\r\nDTEND;VALUE=DATE:20261017\r\n"
+            b"END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        with pytest.raises(ValueError):
+            parse_ics(raw)
+
+
+class TestMovedPairing:
+    def test_same_title_different_dates_is_reported_as_one_move(self) -> None:
+        city = {
+            entry("2027-02-08", "2027-02-20", "Schulen Stadt Zürich: Sportferien"),
+            entry("2027-04-19", "2027-04-30", "Schulen Stadt Zürich: Frühlingsferien"),
+        }
+        ckan = {
+            entry("2027-02-15", "2027-02-27", "Schulen Stadt Zürich: Sportferien"),
+            entry("2027-04-19", "2027-04-30", "Schulen Stadt Zürich: Frühlingsferien"),
+        }
+        report = classify(city, ckan)
+        assert [(a.start, b.start) for a, b in report.moved] == [
+            (date(2027, 2, 8), date(2027, 2, 15))
+        ]
+        # Pairing is presentation only — the move is still drift.
+        assert len(report.drifted) == 2
+
+    def test_unrelated_differences_are_not_paired(self) -> None:
+        city = {
+            entry("2027-02-08", "2027-02-20", "Schulen Stadt Zürich: Sportferien"),
+            entry("2027-06-01", "2027-06-02", "Schulen Stadt Zürich: Projekttag"),
+        }
+        ckan = {
+            entry("2027-02-08", "2027-02-20", "Schulen Stadt Zürich: Sportferien"),
+            entry("2027-05-03", "2027-05-04", "Schulen Stadt Zürich: Weiterbildung"),
+        }
+        assert classify(city, ckan).moved == []

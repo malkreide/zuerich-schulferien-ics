@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+Four findings from a second pass over `scripts/compare_official_ics.py`, which
+shipped without an external review. All four are latent — none changes today's
+result (104 records identical, no drift) — but each would misfire the first
+time the source changed shape.
+
+- **A run that recognises no school record now fails instead of reassuring.**
+  If the city renames the `Schulen Stadt Zürich` prefix in *both* exports, they
+  still match each other perfectly: no drift is found, and the script printed
+  `OK` for a source that had just emptied the feed. `generate_ics.py` catches
+  that at `MIN_SCHOOL_SHARE`, but only after somebody had already trusted this
+  run. The report now carries the recognised-record count per export
+  (`.ics 51, CKAN 47` today) and exits 2 when either is zero. This was the only
+  finding whose failure mode was *quiet*.
+- **Titles are Unicode-normalised (NFC) before comparison.** `ü` has a
+  precomposed and a decomposed encoding, and the two exports come from
+  different tooling — the `.ics` files out of Outlook. Both use NFC today, but
+  if either switched, every record containing `Zürich` (nearly all of them)
+  would be reported as drift in both directions at once. It would also have
+  stopped matching `SCHOOL_RECORD_RE`, whose pattern contains a literal `ü`.
+- **`parse_ics` no longer crashes on a valid `.ics` it does not expect.**
+  Reading `DTEND` unconditionally raised `KeyError` on an event carrying
+  `DURATION` instead, or neither — both allowed by RFC 5545. `DURATION` is now
+  honoured and a bare `DATE` start is read as a one-day event per §3.6.1. An
+  event without `SUMMARY` or `DTSTART` is refused loudly rather than skipped,
+  since skipping would shrink the comparison without saying so.
+- **A rescheduled holiday reads as one move, not two problems.** A changed date
+  lands in both unexplained sets; the report now pairs same-title entries and
+  prints the two spans together. Presentation only — both entries still count
+  as drift.
+
 ### Added
 - `scripts/compare_official_ics.py` — cross-checks the city's official
   per-school-year `.ics` downloads against the CKAN dataset the feed is built
