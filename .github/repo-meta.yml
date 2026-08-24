@@ -13,8 +13,3 @@ default_branch: main
 language: python
 version: 2.0.0
 confirmed: true
-# Backend B (GitHub-MCP-Tools) hat kein Topic-Tool. `topics` oben ist die
-# Quelle der Wahrheit; auf GitHub stehen noch die alten acht. Einmal unter
-# Settings → Topics angleichen, dann diesen Block entfernen.
-offen:
-  - "topics — Stand GitHub: education, github-actions, icalendar, ics, open-data, python, swiss-open-data, zurich"
