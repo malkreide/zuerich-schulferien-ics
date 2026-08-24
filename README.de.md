@@ -158,6 +158,19 @@ diesem Verhalten nicht betroffen.
   Termin entfernt, neuer Termin hinzugefügt». Das ist beabsichtigt: Der
   Generator bleibt zustandslos.
 
+- Die Stadt publiziert diese Termine **zweimal**: als CKAN-Datensatz, aus dem
+  dieser Feed gebaut wird, und als je eine statische `.ics` pro Schuljahr auf
+  der [Schulferien-Seite](https://www.stadt-zuerich.ch/de/bildung/volksschule/schulferien.html).
+  `scripts/compare_official_ics.py` gleicht beide gegeneinander ab. Stand
+  24.08.2026, über alle vier angebotenen Schuljahre: 104 Einträge identisch,
+  keine unerklärte Abweichung. Die beiden systematischen Unterschiede sprechen
+  für CKAN — die Jahresdateien schneiden die Sommerferien an der
+  Schuljahresgrenze (1. August) ab, während CKAN den Block vollständig führt,
+  und CKAN enthält bei den Feiertagen eine Dublette mit gleichem Zeitraum
+  (`Pfingsten` / `Pfingstsonntag`, 20.05.2029), die der Feed ohnehin
+  herausfiltert. In der `.ics`-Übergabe steckt also nichts, was der offene
+  Datensatz nicht hätte.
+
 ## Voraussetzungen
 
 - Python 3.10+
@@ -169,6 +182,8 @@ diesem Verhalten nicht betroffen.
 pip install -r requirements-dev.txt
 pytest -q                 # Testsuite, läuft offline auf Fixtures
 python generate_ics.py    # schreibt public/ferien.ics + public/index.html
+
+python scripts/compare_official_ics.py   # mit Netz: beide Exporte der Stadt vergleichen
 ```
 
 ## Projektstruktur
@@ -177,12 +192,14 @@ python generate_ics.py    # schreibt public/ferien.ics + public/index.html
 zuerich-schulferien-ics/
 ├── generate_ics.py           # CKAN abrufen → filtern → ICS + Seite bauen → Sanity-Gate
 ├── tests/                    # pytest-Suite auf Fixtures, ohne Netzzugriff
+├── scripts/compare_official_ics.py  # Abgleich mit den .ics-Dateien der Stadt
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── web/index.html            # Vorlage der Landing-Page (Abo-Anleitung)
 ├── public/ferien.ics         # generierter Feed (deployt auf GitHub Pages)
 ├── public/index.html         # gerenderte Landing-Page (wird mitdeployt)
-└── .github/workflows/deploy.yml  # nächtlicher Cron + manueller Start, OIDC-Deploy
+├── .github/workflows/deploy.yml    # nächtlicher Cron, OIDC-Deploy, Alarm bei Fehlschlag
+└── .github/workflows/keepalive.yml # monatlicher Heartbeat gegen das Abschalten des Cron
 ```
 
 ## Changelog

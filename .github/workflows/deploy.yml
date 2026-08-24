@@ -6,6 +6,10 @@ on:
   workflow_dispatch:        # manual trigger, e.g. after a new school year is published
   push:
     branches: [main]        # deploy on code changes too
+    paths-ignore:
+      # The keepalive heartbeat changes nothing the feed is built from, so it
+      # must not cost a second build and deploy on top of the nightly one.
+      - '.github/last-heartbeat'
   pull_request:
     branches: [main]        # test only — build and deploy are skipped below
 
@@ -82,3 +86,57 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+
+  # Without this, a failed nightly run is silent: the sanity gate correctly
+  # leaves the last known-good feed on Pages, nothing turns red anywhere a
+  # human looks, and the feed keeps serving dates that quietly stop being
+  # refreshed. Pull requests are excluded — a red check is visible there.
+  alert:
+    needs: [test, build, deploy]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write         # job-level block replaces the workflow defaults
+    steps:
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: Feed-Build fehlgeschlagen
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
+
+          # Match on the exact title rather than the search API: search is
+          # eventually consistent, and a stale index would open a fresh issue
+          # every night instead of commenting on the open one.
+          number=$(curl -sSf "${auth[@]}" "${api}/issues?state=open&per_page=100" \
+            | jq -r --arg t "$TITLE" \
+              '[.[] | select(.pull_request == null) | select(.title == $t)] | first | .number // empty')
+
+          body=$(printf '%s\n' \
+            "Der Lauf **${GITHUB_WORKFLOW}** (\`${GITHUB_EVENT_NAME}\`) ist fehlgeschlagen." \
+            "" \
+            "- Lauf: ${RUN_URL}" \
+            "- Commit: \`${GITHUB_SHA}\`" \
+            "" \
+            "Der zuletzt erfolgreich gebaute Feed wird auf GitHub Pages weiter ausgeliefert —" \
+            "Abonnentinnen und Abonnenten merken zunächst nichts. Er altert aber ab jetzt." \
+            "" \
+            "Häufigste Ursachen: die Quelle hat die Schreibweise ihrer Titel geändert," \
+            "der Datensatz reicht weniger als 180 Tage voraus, oder die CKAN-API war nicht erreichbar." \
+            "Mit \`python scripts/compare_official_ics.py\` lässt sich gegen die offiziellen" \
+            ".ics-Dateien der Stadt prüfen, welche der beiden Quellen abweicht." \
+            "" \
+            "Dieses Issue schliessen, sobald ein Lauf wieder grün ist.")
+
+          if [ -n "$number" ]; then
+            jq -n --arg b "$body" '{body: $b}' \
+              | curl -sSf "${auth[@]}" -X POST -d @- "${api}/issues/${number}/comments" > /dev/null
+            echo "Kommentar an bestehendem Issue #${number} ergänzt."
+          else
+            jq -n --arg t "$TITLE" --arg b "$body" '{title: $t, body: $b}' \
+              | curl -sSf "${auth[@]}" -X POST -d @- "${api}/issues" \
+              | jq -r '"Issue #\(.number) eröffnet: \(.html_url)"'
+          fi
