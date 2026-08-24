@@ -1,0 +1,56 @@
+name: Keepalive
+
+# GitHub disables scheduled workflows in a public repository "when no
+# repository activity has occurred in 60 days". This repository's whole job is
+# a nightly cron, and workflow *runs* do not count as activity — so a project
+# that simply works, with nobody pushing to it, switches its own feed off after
+# two quiet months. Nothing turns red when that happens: the last deployed
+# .ics keeps being served, slowly going stale, and the failure looks exactly
+# like success from the outside.
+#
+# So this commits a heartbeat every month, well inside the 60-day window, and
+# thereby keeps itself alive too.
+#
+# Caveat worth knowing: GitHub documents the 60 days but not what counts as
+# "repository activity", and whether a push made with GITHUB_TOKEN resets the
+# clock is not stated anywhere official. Treat this as a mitigation, not a
+# guarantee — GitHub emails the repository owner before disabling a workflow,
+# and that mail is still the authoritative warning.
+
+on:
+  schedule:
+    # Monthly on the 3rd. Two heartbeats fit inside the 60-day window, so a
+    # single skipped run (GitHub drops scheduled runs under load) is survivable.
+    - cron: '19 4 3 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Commit heartbeat
+        run: |
+          set -euo pipefail
+          date -u +%Y-%m-%dT%H:%M:%SZ > .github/last-heartbeat
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/last-heartbeat
+          # An unchanged file would mean the date command produced the same
+          # second as last month, which cannot happen — but an empty commit
+          # here would be pure noise, so guard rather than force it.
+          if git diff --cached --quiet; then
+            echo 'Heartbeat unverändert, nichts zu committen.'
+            exit 0
+          fi
+          git commit -m "chore: keepalive heartbeat $(cat .github/last-heartbeat)"
+          git push
