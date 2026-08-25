@@ -212,4 +212,4 @@ MIT License — see [LICENSE](LICENSE)
 
 ## Author
 
-Hayal Özkan · [malkreide](https://github.com/malkreide)
+Hayal Oezkan · [malkreide](https://github.com/malkreide)
