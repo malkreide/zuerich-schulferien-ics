@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **«Zu Google Kalender hinzufügen» führte zu «Hinzufügen zum Kalender nicht
+  möglich. Überprüfen Sie die URL.»** Der Link übergab die Feed-Adresse als
+  `cid=https://…`, unkodiert. Google verlangt für ein Abo auf eine fremde
+  `.ics`-Datei das `webcal`-Schema und den Wert prozentkodiert; mit `https`
+  bricht die Oberfläche mit genau dieser Meldung ab. Landing-Page und beide
+  READMEs verweisen jetzt auf
+  `cid=webcal%3A%2F%2Fmalkreide.github.io%2Fzuerich-schulferien-ics%2Fferien.ics`.
+  Der Feed selbst war nie betroffen — er liefert unverändert HTTP 200 mit
+  `Content-Type: text/calendar`. Dazu auf der Seite ein Weg von Hand
+  (*Weitere Kalender → + → Per URL*) für den Fall, dass der Link erneut klemmt.
+
 Four findings from a second pass over `scripts/compare_official_ics.py`, which
 shipped without an external review. All four are latent — none changes today's
 result (104 records identical, no drift) — but each would misfire the first
