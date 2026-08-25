@@ -52,7 +52,7 @@ entfernen, ohne dass jemand gefragt wurde.
 | Plattform | Abo-Weg |
 |---|---|
 | Apple Kalender (iOS/macOS) | `webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` öffnen |
-| Google Kalender / Android | `https://calendar.google.com/calendar/r?cid=https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` öffnen und bestätigen |
+| Google Kalender / Android | `https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fmalkreide.github.io%2Fzuerich-schulferien-ics%2Fferien.ics` öffnen und bestätigen |
 | Andere Clients (Nextcloud, Thunderbird, …) | Roh-URL als Kalenderabonnement eintragen |
 
 **Android:** Den HTTPS-Link nicht einfach im Browser antippen — das lädt eine

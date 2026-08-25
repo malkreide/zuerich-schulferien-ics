@@ -8,6 +8,7 @@ holiday one day too long, silently) reaches every subscriber overnight.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -1085,6 +1086,31 @@ def test_landing_page_offers_every_variant():
     for variant in FEED_VARIANTS:
         assert f"/{variant.filename}" in page
     assert "{{" not in page
+
+
+def test_google_subscribe_link_passes_a_percent_encoded_webcal_url():
+    """`cid=https://…` makes Google refuse the feed.
+
+    Handed an unencoded ``https`` URL, the Google Calendar UI answers
+    «Hinzufügen zum Kalender nicht möglich. Überprüfen Sie die URL.» and adds
+    nothing. The subscribe entry point wants the ``webcal`` scheme, and the
+    value belongs in the query string percent-encoded. The feed itself is fine
+    either way, so nothing else in this suite notices the broken link.
+    """
+    counts = {v.filename: 42 for v in FEED_VARIANTS}
+
+    page = render_page(
+        variant_events(sample_events(), PRIMARY),
+        counts,
+        date(2026, 8, 23),
+        generate_ics.PAGE_TEMPLATE,
+    )
+
+    cids = re.findall(r"calendar\.google\.com/[^\"\s]*?[?&]cid=([^\"&\s]*)", page)
+    assert cids, "the page no longer offers a Google Calendar subscribe link"
+    for cid in cids:
+        assert cid.startswith("webcal%3A%2F%2F"), cid
+        assert "/" not in cid and ":" not in cid, cid
 
 
 # --------------------------------------------------------------------------

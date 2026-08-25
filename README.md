@@ -51,7 +51,7 @@ calendars without anyone asking.
 | Platform | How to subscribe |
 |---|---|
 | Apple Calendar (iOS/macOS) | Open `webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` |
-| Google Calendar / Android | Open `https://calendar.google.com/calendar/r?cid=https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics` and confirm |
+| Google Calendar / Android | Open `https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fmalkreide.github.io%2Fzuerich-schulferien-ics%2Fferien.ics` and confirm |
 | Other clients (Nextcloud, Thunderbird, …) | Add the raw HTTPS URL as a calendar subscription |
 
 **Android users:** do not simply tap the HTTPS link in a browser — that
