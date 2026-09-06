@@ -87,6 +87,13 @@ time the source changed shape.
 ### Changed
 - The `push` trigger on `deploy.yml` ignores `.github/last-heartbeat`, so the
   heartbeat does not cost a second build and deploy on top of the nightly one.
+- Action pins now carry the exact patch version as their trailing comment
+  (`# v7.0.1`) instead of the major (`# v7`). A moving major tag as the comment
+  drifts away from the frozen SHA the moment upstream ships a patch — the line
+  then documents a version the build is not running, which is the one thing a
+  pin exists to prevent.
+- `actions/deploy-pages` moved from v5.0.0 to v5.0.1
+  (`368f825…`), the current head of the v5 tag.
 
 ## [2.0.0] - 2026-08-23
 
