@@ -65,6 +65,17 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Generate feed (fails hard on implausible data)
+        env:
+          # Where the feed is published and where its source lives. Empty
+          # means "unchanged", so an untouched repository keeps deploying
+          # exactly what it deploys today. On a handover these are set as
+          # repository variables (Settings -> Secrets and variables ->
+          # Actions -> Variables) instead of editing code — the checklist is
+          # in docs/BETRIEB.md. A mistyped value fails this step rather than
+          # publishing a page whose subscribe buttons point nowhere.
+          FEED_BASE_URL: ${{ vars.FEED_BASE_URL }}
+          REPO_URL: ${{ vars.REPO_URL }}
+          PAGES_CUSTOM_DOMAIN: ${{ vars.PAGES_CUSTOM_DOMAIN }}
         run: python generate_ics.py
 
       - name: Upload artifact

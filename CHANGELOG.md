@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Das Projekt ist übergabefähig.** Feed-Adresse, Custom Domain und
+  Quellcode-Link kommen aus Repository-Variablen (`FEED_BASE_URL`,
+  `PAGES_CUSTOM_DOMAIN`, `REPO_URL`) statt aus dem Code; die Landing-Page
+  nennt kein Konto mehr im Klartext. Ein Umzug in eine Organisation braucht
+  damit keine Codeänderung, und ein Tippfehler in der Konfiguration lässt den
+  Build scheitern, statt eine Seite mit toten Abo-Schaltflächen zu
+  publizieren. `UID_DOMAIN` bleibt bewusst fest verdrahtet und ist durch einen
+  Test geschützt: Zöge es mit um, würde jeder Termin in jedem abonnierten
+  Kalender entfernt und neu angelegt.
+- `docs/BETRIEB.md` — Runbook mit Rollen, Störungsbehebung, wiederkehrenden
+  Aufgaben, vollständiger Umzugs-Checkliste und dem Vorgehen für eine
+  kontrollierte Abschaltung.
+- `docs/GOVERNANCE-SCHULAMT-ORG.md` — Entwurf einer Governance-Grundlage für
+  eine GitHub-Organisation des Schulamts: Zweck und Abgrenzung, Rollen und
+  Zugriff, Publikationsentscheid, Mindeststandards, Lebenszyklus.
+- `.github/CODEOWNERS`, damit Pull Requests automatisch an die Betreuung gehen.
+
 ### Fixed
 - **«Zu Google Kalender hinzufügen» führte zu «Hinzufügen zum Kalender nicht
   möglich. Überprüfen Sie die URL.»** Der Link übergab die Feed-Adresse als

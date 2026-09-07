@@ -196,11 +196,24 @@ zuerich-schulferien-ics/
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── web/index.html            # Vorlage der Landing-Page (Abo-Anleitung)
+├── docs/BETRIEB.md           # Runbook: Störungen, Rollen, Umzugs-Checkliste
+├── docs/GOVERNANCE-SCHULAMT-ORG.md  # Entwurf: Regeln für eine Schulamt-Organisation
 ├── public/ferien.ics         # generierter Feed (deployt auf GitHub Pages)
 ├── public/index.html         # gerenderte Landing-Page (wird mitdeployt)
 ├── .github/workflows/deploy.yml    # nächtlicher Cron, OIDC-Deploy, Alarm bei Fehlschlag
 └── .github/workflows/keepalive.yml # monatlicher Heartbeat gegen das Abschalten des Cron
 ```
+
+## Betrieb und Übergabe
+
+Wer den Feed betreibt oder übernimmt, findet das Runbook in
+[docs/BETRIEB.md](docs/BETRIEB.md): Rollen, Vorgehen bei Störungen und die
+Checkliste für einen Umzug in ein anderes Konto oder eine Organisation.
+
+Adresse und Quellcode-Link sind konfigurierbar (`PAGES_CUSTOM_DOMAIN`,
+`FEED_BASE_URL`, `REPO_URL` als Repository-Variablen) — ein Umzug braucht
+keine Codeänderung. Was dabei **nicht** verändert werden darf, ist
+`UID_DOMAIN`: Daran erkennen Kalender-Apps bestehende Abos wieder.
 
 ## Changelog
 

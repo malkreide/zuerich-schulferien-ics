@@ -44,6 +44,10 @@ Design decisions
   are published (see ``CUTOFF_YEARS_BACK``). The source goes back to 2018, which
   buries subscribers under years of irrelevant past entries. An event that
   straddles the cutoff (e.g. Weihnachtsferien 2024/25) is kept in full.
+- Where the feed is published is configuration, not code: the base URL, the
+  Pages custom domain and the source link come from the environment, so a
+  transfer to another account or organisation needs no code change. The one
+  thing that must never move with it is ``UID_DOMAIN`` — see its comment.
 - The landing page (``web/index.html``) is rendered into ``public/`` by the same
   run that writes the feed. Both artifacts therefore pass the same sanity gate:
   a broken CKAN response leaves the last known-good page *and* feed in place,
@@ -54,12 +58,14 @@ from __future__ import annotations
 
 import hashlib
 import html
+import os
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import requests
@@ -75,8 +81,99 @@ FEED_CAPTION = (
 )
 PAGE_TEMPLATE = Path("web/index.html")
 PAGE_FILE = OUTPUT_DIR / "index.html"
+
+# --- Deployment identity -------------------------------------------------
+# Everything that changes when the project moves to another account, another
+# organisation or its own domain is resolved from the environment, so a
+# handover needs no code change. ``docs/BETRIEB.md`` carries the checklist.
+#
+# UID_DOMAIN is deliberately *not* part of that. Every event UID ends in this
+# domain, and calendar clients match subscribed events by UID. Repointing it
+# at a new owner would present the whole feed as a fresh set of events: every
+# holiday removed and re-added in every subscribed calendar, alarms reset,
+# and a duplicate of each entry in clients that keep the old copy instead of
+# dropping it. That is precisely what the deterministic UID design exists to
+# prevent. The value stays what it is, whoever ends up owning the repository.
 UID_DOMAIN = "zuerich-schulferien-ics.malkreide.github.io"
-FEED_BASE_URL = "https://malkreide.github.io/zuerich-schulferien-ics"
+
+DEFAULT_FEED_BASE_URL = "https://malkreide.github.io/zuerich-schulferien-ics"
+DEFAULT_REPO_URL = "https://github.com/malkreide/zuerich-schulferien-ics"
+
+
+def _checked_https(value: str, name: str) -> str:
+    """Validate a configured URL and strip its trailing slash.
+
+    A typo here does not fail the build, it publishes a landing page whose
+    subscribe buttons point nowhere — the kind of breakage nobody notices
+    because the feed itself keeps working. So it is checked at import time.
+    """
+    url = value.strip().rstrip("/")
+    if not url.startswith("https://") or len(url) <= len("https://"):
+        raise RuntimeError(f"{name} must be an https:// URL, got {value!r}.")
+    return url
+
+
+# A bare hostname, which is what both GitHub Pages and a CNAME file expect.
+# Pasting a full URL in here is the obvious mistake, and it would otherwise
+# build "https://https://schulferien.example.ch" without complaining.
+DOMAIN_RE = re.compile(
+    r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+)
+
+
+def resolve_custom_domain(env: Mapping[str, str]) -> str:
+    """The Pages custom domain, or an empty string when there is none."""
+    domain = env.get("PAGES_CUSTOM_DOMAIN", "").strip().strip("/").lower()
+    if domain and not DOMAIN_RE.match(domain):
+        raise RuntimeError(
+            f"PAGES_CUSTOM_DOMAIN must be a bare hostname such as "
+            f"schulferien.example.ch, got {domain!r}."
+        )
+    return domain
+
+
+def resolve_feed_base_url(env: Mapping[str, str]) -> str:
+    """Where the published feeds will be reachable.
+
+    An explicit ``FEED_BASE_URL`` wins, a configured custom domain is used
+    next, and the historical Pages URL is the fallback — so an unconfigured
+    checkout keeps producing exactly what is deployed today.
+    """
+    explicit = env.get("FEED_BASE_URL", "").strip()
+    if explicit:
+        return _checked_https(explicit, "FEED_BASE_URL")
+    domain = resolve_custom_domain(env)
+    if domain:
+        return f"https://{domain}"
+    return DEFAULT_FEED_BASE_URL
+
+
+def resolve_repo_url(env: Mapping[str, str]) -> str:
+    """Where the source lives — linked from the landing page."""
+    explicit = env.get("REPO_URL", "").strip()
+    return _checked_https(explicit, "REPO_URL") if explicit else DEFAULT_REPO_URL
+
+
+def write_cname(directory: Path, domain: str) -> Path | None:
+    """Write the Pages custom domain next to the feeds, if one is configured.
+
+    GitHub Pages reads the custom domain from the repository settings, not
+    from the deployed artifact, so this file is not what makes the domain
+    work. It is written anyway: it keeps the domain in place should the Pages
+    source ever be switched back to branch publishing, and it makes the
+    configured domain visible in the output instead of only in a settings
+    dialog nobody reads during a handover.
+    """
+    if not domain:
+        return None
+    path = directory / "CNAME"
+    path.write_text(f"{domain}\n", encoding="utf-8")
+    return path
+
+
+CUSTOM_DOMAIN = resolve_custom_domain(os.environ)
+FEED_BASE_URL = resolve_feed_base_url(os.environ)
+REPO_URL = resolve_repo_url(os.environ)
 
 # Publish events from the start of this many calendar years ago. 2 => on any
 # day in 2026 the feed starts at 2024-01-01.
@@ -604,6 +701,30 @@ def render_year_tables(events: list[SchoolEvent], today: date) -> str:
     return "\n".join(blocks)
 
 
+def deployment_urls() -> dict[str, str]:
+    """The links the landing page needs, derived from the deployment config.
+
+    Kept out of the template so a transfer changes one environment variable
+    instead of six spellings of the current owner's account name in the HTML.
+    Values are escaped here because ``render_page`` shadows ``html`` with the
+    page it is building.
+    """
+    feed_url = f"{FEED_BASE_URL}/{FEED_VARIANTS[0].filename}"
+    # Apple's calendar clients subscribe on the webcal scheme; the same URL
+    # over https merely downloads a one-off copy that never updates again.
+    webcal_url = "webcal://" + feed_url.removeprefix("https://")
+    google_url = "https://calendar.google.com/calendar/r?cid=" + quote(
+        webcal_url, safe=""
+    )
+    return {
+        "FEED_URL": html.escape(feed_url),
+        "FEED_URL_WEBCAL": html.escape(webcal_url),
+        "FEED_URL_GOOGLE": html.escape(google_url),
+        "REPO_URL": html.escape(REPO_URL),
+        "REPO_LABEL": html.escape(REPO_URL.removeprefix("https://")),
+    }
+
+
 def render_variant_rows(counts: dict[str, int]) -> str:
     """The feed picker on the landing page, one row per variant."""
     rows = []
@@ -644,6 +765,7 @@ def render_page(
         "UPDATED": built.strftime("%d.%m.%Y"),
         "YEAR_TABLES": render_year_tables(events, built),
         "VARIANT_ROWS": render_variant_rows(counts),
+        **deployment_urls(),
     }
 
     html = template.read_text(encoding="utf-8")
@@ -683,6 +805,7 @@ def main() -> int:
     for filename, ics_bytes in generated.items():
         (OUTPUT_DIR / filename).write_bytes(ics_bytes)
     PAGE_FILE.write_text(page_html, encoding="utf-8")
+    cname = write_cname(OUTPUT_DIR, CUSTOM_DOMAIN)
 
     latest = max(parse_date(r["end_date"]) for r in records)
     summary = ", ".join(f"{name} {counts[name]}" for name in generated)
@@ -692,6 +815,9 @@ def main() -> int:
         f"{(latest - today).days} days of coverage ahead)."
     )
     print(f"OK: landing page written to {PAGE_FILE} ({len(page_html)} chars).")
+    print(f"OK: feeds published under {FEED_BASE_URL}.")
+    if cname:
+        print(f"OK: custom domain {CUSTOM_DOMAIN} written to {cname}.")
     return 0
 
 

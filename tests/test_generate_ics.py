@@ -32,9 +32,13 @@ from generate_ics import (
     parse_stamp,
     render_page,
     render_year_tables,
+    resolve_custom_domain,
+    resolve_feed_base_url,
+    resolve_repo_url,
     school_year,
     select_events,
     variant_events,
+    write_cname,
 )
 
 CUTOFF = date(2024, 1, 1)
@@ -1186,3 +1190,135 @@ def test_forward_coverage_is_checked_before_the_running_year():
 
     with pytest.raises(RuntimeError, match="has probably not"):
         check_source(records, select_events(records, cutoff_date(today)), today)
+
+
+# --------------------------------------------------------------------------
+# Handover: the deployment must be configurable, the UIDs must not be
+# --------------------------------------------------------------------------
+
+# The historical Pages host. It appears here on purpose: these tests exist to
+# make a rename visible, so they must not read the value they are guarding
+# out of the module they are guarding.
+LEGACY_HOST = "malkreide.github.io"
+
+
+def moved(monkeypatch) -> None:
+    """Point the module at a new owner, as a completed transfer would."""
+    monkeypatch.setattr(
+        generate_ics, "FEED_BASE_URL", "https://schulferien.stadt-zuerich.ch"
+    )
+    monkeypatch.setattr(
+        generate_ics, "REPO_URL", "https://github.com/schulamt-zuerich/schulferien"
+    )
+
+
+def test_uid_domain_survives_a_move():
+    """The one value a handover must not touch.
+
+    Every UID ends in this domain, and subscribed clients match events by
+    UID. A search-and-replace of the old account name across the repository
+    would sweep it up, and every subscriber would silently get the whole feed
+    removed and re-added. If this test is failing because the value changed,
+    the change is the bug — not the test.
+    """
+    assert generate_ics.UID_DOMAIN == "zuerich-schulferien-ics.malkreide.github.io"
+
+
+def test_uids_do_not_follow_the_deployment(monkeypatch):
+    """Publishing from a new host must not resync anyone's calendar."""
+    before = [e.uid for e in sample_events()]
+
+    moved(monkeypatch)
+    after = [e.uid for e in sample_events()]
+
+    assert after == before
+    assert all(uid.endswith(f"@{generate_ics.UID_DOMAIN}") for uid in after)
+
+
+def test_landing_page_follows_the_configured_deployment(monkeypatch):
+    moved(monkeypatch)
+
+    page = render_page(
+        variant_events(sample_events(), PRIMARY),
+        COUNTS,
+        TODAY,
+        generate_ics.PAGE_TEMPLATE,
+    )
+
+    assert LEGACY_HOST not in page
+    assert "https://schulferien.stadt-zuerich.ch/ferien.ics" in page
+    assert "webcal://schulferien.stadt-zuerich.ch/ferien.ics" in page
+    assert "https://github.com/schulamt-zuerich/schulferien/issues" in page
+    assert "{{" not in page
+
+
+def test_landing_page_template_names_no_host():
+    """A hardcoded URL in the template would survive the move unnoticed."""
+    template = generate_ics.PAGE_TEMPLATE.read_text(encoding="utf-8")
+
+    assert LEGACY_HOST not in template
+    assert "github.com/" not in template
+
+
+def test_feed_base_url_prefers_the_explicit_setting():
+    url = resolve_feed_base_url(
+        {
+            "FEED_BASE_URL": "https://feeds.example.ch/schulferien/",
+            "PAGES_CUSTOM_DOMAIN": "ignoriert.example.ch",
+        }
+    )
+
+    assert url == "https://feeds.example.ch/schulferien"
+
+
+def test_feed_base_url_falls_back_to_the_custom_domain():
+    assert (
+        resolve_feed_base_url({"PAGES_CUSTOM_DOMAIN": "schulferien.example.ch"})
+        == "https://schulferien.example.ch"
+    )
+
+
+def test_unconfigured_checkout_keeps_publishing_what_is_deployed_today():
+    """No environment must mean no behaviour change."""
+    assert resolve_feed_base_url({}) == generate_ics.DEFAULT_FEED_BASE_URL
+    assert resolve_repo_url({}) == generate_ics.DEFAULT_REPO_URL
+    assert resolve_custom_domain({}) == ""
+
+
+@pytest.mark.parametrize(
+    ("env", "name"),
+    [
+        ({"FEED_BASE_URL": "http://feeds.example.ch"}, "FEED_BASE_URL"),
+        ({"FEED_BASE_URL": "feeds.example.ch"}, "FEED_BASE_URL"),
+        ({"FEED_BASE_URL": "https://"}, "FEED_BASE_URL"),
+        ({"PAGES_CUSTOM_DOMAIN": "https://doppelt.example.ch"}, "PAGES_CUSTOM_DOMAIN"),
+        ({"PAGES_CUSTOM_DOMAIN": "schulferien"}, "PAGES_CUSTOM_DOMAIN"),
+        ({"PAGES_CUSTOM_DOMAIN": "schulferien.example.ch/feed"}, "PAGES_CUSTOM_DOMAIN"),
+    ],
+)
+def test_a_mistyped_url_fails_the_build_rather_than_the_page(env, name):
+    """Otherwise the feed keeps working and only the buttons point nowhere."""
+    with pytest.raises(RuntimeError, match=name):
+        resolve_feed_base_url(env)
+
+
+def test_repo_url_must_be_https():
+    with pytest.raises(RuntimeError, match="REPO_URL"):
+        resolve_repo_url({"REPO_URL": "github.com/schulamt-zuerich/schulferien"})
+
+
+def test_cname_is_written_only_when_a_domain_is_configured(tmp_path):
+    assert write_cname(tmp_path, "") is None
+    assert not (tmp_path / "CNAME").exists()
+
+    path = write_cname(tmp_path, "schulferien.example.ch")
+
+    assert path == tmp_path / "CNAME"
+    assert path.read_text(encoding="utf-8") == "schulferien.example.ch\n"
+
+
+def test_custom_domain_is_normalised_the_way_a_cname_wants_it():
+    assert (
+        resolve_custom_domain({"PAGES_CUSTOM_DOMAIN": " Schulferien.Example.CH/ "})
+        == "schulferien.example.ch"
+    )
