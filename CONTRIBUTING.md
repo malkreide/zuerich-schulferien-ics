@@ -19,6 +19,10 @@ python generate_ics.py        # writes public/ferien.ics + public/index.html
 - Do **not** add a `+1 day` correction to `end_date` — the source data is
   already exclusive (see comments in `generate_ics.py`). `pytest` fails loudly
   if you do.
+- Do **not** change `UID_DOMAIN`, not even when the repository moves to
+  another owner. Subscribed calendars match events by UID; repointing it
+  removes and re-adds every holiday in every subscriber's calendar. See
+  `docs/BETRIEB.md`.
 - Only records prefixed `Schulen Stadt Zürich` are published; plain public
   holidays are filtered out on purpose (see the module docstring).
 - Before cutting a release, run `python scripts/compare_official_ics.py`. It

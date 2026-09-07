@@ -1,0 +1,7 @@
+# Wer bei jedem Pull Request automatisch als Reviewer angefragt wird.
+#
+# Beim Transfer in eine Organisation auf das dortige Team umstellen, etwa
+# `* @schulamt-zuerich/schulferien`. Achtung: Ein Eintrag, der auf ein nicht
+# existierendes Konto oder Team zeigt, wird von GitHub stillschweigend
+# ignoriert — dann prüft niemand mehr, und nichts weist darauf hin.
+* @malkreide

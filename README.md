@@ -188,11 +188,24 @@ zuerich-schulferien-ics/
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── web/index.html            # landing page template (subscription instructions)
+├── docs/BETRIEB.md           # runbook (German): incidents, roles, handover checklist
+├── docs/GOVERNANCE-SCHULAMT-ORG.md  # draft (German): rules for a Schulamt organisation
 ├── public/ferien.ics         # generated feed (deployed to GitHub Pages)
 ├── public/index.html         # rendered landing page (deployed alongside)
 ├── .github/workflows/deploy.yml    # nightly cron + manual trigger, OIDC deploy, failure alarm
 └── .github/workflows/keepalive.yml # monthly heartbeat, keeps the cron from being auto-disabled
 ```
+
+## Operations and handover
+
+The runbook lives in [docs/BETRIEB.md](docs/BETRIEB.md) (German): roles, what
+to do when the nightly build fails, and the checklist for moving the project
+to another account or organisation.
+
+The published address and the source link are configurable
+(`PAGES_CUSTOM_DOMAIN`, `FEED_BASE_URL`, `REPO_URL` as repository variables),
+so a move needs no code change. `UID_DOMAIN` must **not** be changed with it:
+calendar clients recognise existing subscriptions by it.
 
 ## Changelog
 

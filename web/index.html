@@ -213,8 +213,8 @@
   <div class="feed">
     <p class="feed-label">Diese Adresse im Kalender eintragen</p>
     <div class="feed-row">
-      <div class="feed-url" id="feed-url">https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics</div>
-      <button class="copy" type="button" data-url="https://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Kopieren</button>
+      <div class="feed-url" id="feed-url">{{FEED_URL}}</div>
+      <button class="copy" type="button" data-url="{{FEED_URL}}">Kopieren</button>
     </div>
   </div>
 
@@ -238,7 +238,7 @@
   <div class="platform">
     <h3>iPhone, iPad und Mac (Apple Kalender)</h3>
     <p>Den folgenden Link antippen und das Abo bestätigen:</p>
-    <p><a class="btn-link" href="webcal://malkreide.github.io/zuerich-schulferien-ics/ferien.ics">Kalender abonnieren</a></p>
+    <p><a class="btn-link" href="{{FEED_URL_WEBCAL}}">Kalender abonnieren</a></p>
     <p>
       Falls der Link nicht greift: in der Kalender-App
       <em>Ablage → Neues Kalenderabonnement</em> (macOS) bzw.
@@ -256,7 +256,7 @@
         Stattdessen den Link unten benutzen.
       </p>
     </div>
-    <p><a class="btn-link" href="https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fmalkreide.github.io%2Fzuerich-schulferien-ics%2Fferien.ics">Zu Google Kalender hinzufügen</a></p>
+    <p><a class="btn-link" href="{{FEED_URL_GOOGLE}}">Zu Google Kalender hinzufügen</a></p>
     <p>
       Google fragt nach einer Bestätigung. Das Abo wird im Google-Konto angelegt
       und erscheint danach automatisch auf allen angemeldeten Geräten. Der Abgleich
@@ -337,11 +337,11 @@
     abrufende Programm die Zeichenkodierung falsch geraten – der Feed selbst ist
     UTF-8 und korrekt. Kalender-Apps sind davon nicht betroffen; es tritt nur
     beim Abruf über manche Kommandozeilen-Werkzeuge auf. Details dazu stehen in
-    der <a href="https://github.com/malkreide/zuerich-schulferien-ics#verifying-the-feed">Projekt-Dokumentation</a>.
+    der <a href="{{REPO_URL}}#verifying-the-feed">Projekt-Dokumentation</a>.
   </p>
   <p>
     Fehlende oder falsche Termine bitte als
-    <a href="https://github.com/malkreide/zuerich-schulferien-ics/issues">Issue auf GitHub</a>
+    <a href="{{REPO_URL}}/issues">Issue auf GitHub</a>
     melden. Stammt der Fehler aus den Originaldaten, kann ihn nur die Stadt
     Zürich korrigieren – der Feed gibt sie unverändert weiter.
   </p>
@@ -349,7 +349,7 @@
   <footer>
     <p>
       Quelltext und Dokumentation:
-      <a href="https://github.com/malkreide/zuerich-schulferien-ics">github.com/malkreide/zuerich-schulferien-ics</a>
+      <a href="{{REPO_URL}}">{{REPO_LABEL}}</a>
       · MIT-Lizenz
     </p>
     <p>
