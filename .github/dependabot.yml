@@ -10,8 +10,8 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-    # Ein PR pro Woche fuer alle Actions statt einer pro Action. Bei vielen
+      interval: monthly
+    # Ein PR pro Monat fuer alle Actions statt einer pro Action. Bei vielen
     # Repos ist die Zahl der PRs das eigentliche Problem, nicht ihr Inhalt:
     # was einzeln aufschlaegt, wird nicht gelesen, sondern weggeklickt.
     groups:
